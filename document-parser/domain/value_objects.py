@@ -80,6 +80,7 @@ class DocumentEditAction(StrEnum):
     """Mutations supported by the document edit workflow."""
 
     UPDATE_PAGE_ELEMENT = "update_page_element"
+    DELETE_ITEM = "delete_item"
     MERGE_ITEMS = "merge_items"
     SPLIT_ITEM = "split_item"
     MOVE_ITEM_BEFORE = "move_item_before"

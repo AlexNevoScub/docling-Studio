@@ -295,6 +295,66 @@ class TestDocumentEditService:
         assert second_ref == first_ref
         assert _tree_draft_ref_by_ref(first["tree"], "#/texts/12") == first_ref
 
+    async def test_delete_item_removes_text_sibling_in_preview_and_commit(
+        self, service, repos, doc, analysis
+    ):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/12")
+
+        session = await service.apply_commands(
+            doc.id,
+            session_id=initial_session["sessionId"],
+            draft_version=initial_session["draftVersion"],
+            commands=[
+                {
+                    "action": "delete_item",
+                    "targetRef": target_ref,
+                    "payload": {},
+                }
+            ],
+        )
+
+        assert not _has_element_ref(session["pages"], "#/texts/12")
+        assert "#/texts/12" not in _root_tree_refs(session["tree"])
+
+        commit_result = await service.commit(
+            doc.id,
+            session_id=session["sessionId"],
+            draft_version=session["draftVersion"],
+        )
+
+        assert commit_result["committed"] is True
+        assert not _has_element_ref(commit_result["pages"], "#/texts/12")
+        assert "#/texts/12" not in _root_tree_refs(commit_result["tree"])
+
+        persisted = await repos["analyses"].find_latest_completed_by_document(doc.id)
+        assert persisted is not None
+        persisted_doc = json.loads(persisted.document_json or "{}")
+        assert not any(
+            item.get("self_ref") == "#/texts/12" for item in persisted_doc.get("texts", [])
+        )
+        assert "#/texts/12" not in _child_ref_order(persisted_doc["body"].get("children", []))
+
+    async def test_rejects_delete_item_for_group_node(self, service, doc, analysis):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _tree_draft_ref_by_ref(initial_session["tree"], "#/groups/0")
+
+        with pytest.raises(DocumentEditConflictError) as exc:
+            await service.apply_commands(
+                doc.id,
+                session_id=initial_session["sessionId"],
+                draft_version=initial_session["draftVersion"],
+                commands=[
+                    {
+                        "action": "delete_item",
+                        "targetRef": target_ref,
+                        "payload": {},
+                    }
+                ],
+            )
+
+        assert "currently supports text items only" in str(exc.value)
+
     async def test_merge_items_merges_adjacent_text_siblings_and_commits(
         self, service, repos, doc, analysis
     ):

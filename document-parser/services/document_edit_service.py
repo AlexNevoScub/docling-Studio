@@ -277,6 +277,9 @@ class DocumentEditService:
             if edit.action is DocumentEditAction.UPDATE_PAGE_ELEMENT:
                 self._apply_update_page_element(document, edit, bindings)
                 continue
+            if edit.action is DocumentEditAction.DELETE_ITEM:
+                document = self._apply_delete_item(document, edit, bindings)
+                continue
             if edit.action is DocumentEditAction.MERGE_ITEMS:
                 document = self._apply_merge_items(document, edit, bindings)
                 continue
@@ -373,6 +376,14 @@ class DocumentEditService:
                 )
             return
 
+        if action is DocumentEditAction.DELETE_ITEM:
+            unknown = sorted(payload)
+            if unknown:
+                raise DocumentEditConflictError(
+                    f"Unsupported delete_item payload fields: {', '.join(unknown)}"
+                )
+            return
+
         if action is DocumentEditAction.MERGE_ITEMS:
             allowed = {"trailingTargetRef", "separator"}
             unknown = sorted(set(payload) - allowed)
@@ -465,6 +476,15 @@ class DocumentEditService:
         if target_ref == after_target_ref:
             raise DocumentEditConflictError("move_item_after targetRef cannot equal afterTargetRef")
         return self._reorder_item_after(document, target_ref, after_target_ref)
+
+    def _apply_delete_item(
+        self,
+        document: DoclingDocument,
+        edit: DocumentEdit,
+        bindings: dict[str, DraftNodeBinding],
+    ) -> DoclingDocument:
+        target_ref = self._resolve_self_ref(edit.target_ref, bindings)
+        return self._delete_item(document, target_ref)
 
     def _apply_merge_items(
         self,
@@ -758,6 +778,38 @@ class DocumentEditService:
 
         children.pop(trailing_index)
         self._remove_text_item_from_document_dict(document_dict, trailing_target_ref)
+        return DoclingDocument.model_validate(document_dict)
+
+    def _delete_item(
+        self,
+        document: DoclingDocument,
+        target_ref: str,
+    ) -> DoclingDocument:
+        target_item = self._find_item(document, target_ref)
+        if not isinstance(target_item, TextItem):
+            raise DocumentEditConflictError("delete_item currently supports text items only")
+
+        document_dict = document.export_to_dict()
+        nodes_by_ref = self._index_document_nodes(document_dict)
+        target_node = nodes_by_ref.get(target_ref)
+        if target_node is None:
+            raise DocumentEditNotFoundError(f"Document item not found: {target_ref}")
+
+        parent_ref = self._parent_ref(target_node)
+        if not parent_ref:
+            raise DocumentEditConflictError(f"Target node is missing a parent: {target_ref}")
+        parent_node = nodes_by_ref.get(parent_ref)
+        if parent_node is None:
+            raise DocumentEditConflictError(f"Parent node not found for delete: {parent_ref}")
+        children = parent_node.get("children")
+        if not isinstance(children, list):
+            raise DocumentEditConflictError(
+                f"Parent does not expose deletable children: {parent_ref}"
+            )
+
+        child_index = self._child_index(children, target_ref)
+        children.pop(child_index)
+        self._remove_text_item_from_document_dict(document_dict, target_ref)
         return DoclingDocument.model_validate(document_dict)
 
     def _reorder_item_before(
