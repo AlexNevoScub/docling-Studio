@@ -12,6 +12,7 @@ from domain.models import AnalysisJob, AnalysisStatus, Document
 from persistence.analysis_repo import SqliteAnalysisRepository
 from persistence.database import init_db
 from persistence.document_edit_repo import SqliteDocumentEditRepository
+from persistence.document_edit_session_repo import SqliteDocumentEditSessionRepository
 from persistence.document_repo import SqliteDocumentRepository
 from services.document_edit_service import DocumentEditConflictError, DocumentEditService
 
@@ -58,6 +59,7 @@ def repos():
         "documents": SqliteDocumentRepository(),
         "analyses": SqliteAnalysisRepository(),
         "edits": SqliteDocumentEditRepository(),
+        "sessions": SqliteDocumentEditSessionRepository(),
     }
 
 
@@ -80,6 +82,7 @@ def service(repos) -> DocumentEditService:
         document_repo=repos["documents"],
         analysis_repo=repos["analyses"],
         edit_repo=repos["edits"],
+        session_repo=repos["sessions"],
     )
 
 
@@ -89,6 +92,8 @@ class TestDocumentEditService:
 
         session = await service.apply_commands(
             doc.id,
+            session_id=(await service.get_session(doc.id))["sessionId"],
+            draft_version=0,
             commands=[
                 {
                     "action": "update_page_element",
@@ -102,7 +107,11 @@ class TestDocumentEditService:
         assert preview_element["content"] == updated_content
         assert len(session["pendingCommands"]) == 1
 
-        commit_result = await service.commit(doc.id, session["pages"])
+        commit_result = await service.commit(
+            doc.id,
+            session_id=session["sessionId"],
+            draft_version=session["draftVersion"],
+        )
         assert commit_result["committed"] is True
         assert commit_result["consistent"] is True
 
@@ -125,6 +134,8 @@ class TestDocumentEditService:
 
         session = await service.apply_commands(
             doc.id,
+            session_id=(await service.get_session(doc.id))["sessionId"],
+            draft_version=0,
             commands=[
                 {
                     "action": "update_page_element",
@@ -137,7 +148,11 @@ class TestDocumentEditService:
         preview_element = _element_by_ref(session["pages"], "#/texts/12")
         assert preview_element["bbox"] == pytest.approx(updated_bbox)
 
-        commit_result = await service.commit(doc.id, session["pages"])
+        commit_result = await service.commit(
+            doc.id,
+            session_id=session["sessionId"],
+            draft_version=session["draftVersion"],
+        )
         assert commit_result["committed"] is True
         persisted = await repos["analyses"].find_latest_completed_by_document(doc.id)
         assert persisted is not None
@@ -147,6 +162,8 @@ class TestDocumentEditService:
     async def test_allows_safe_type_change_within_text_family(self, service, doc, analysis):
         session = await service.apply_commands(
             doc.id,
+            session_id=(await service.get_session(doc.id))["sessionId"],
+            draft_version=0,
             commands=[
                 {
                     "action": "update_page_element",
@@ -159,7 +176,11 @@ class TestDocumentEditService:
         preview_element = _element_by_ref(session["pages"], "#/texts/12")
         assert preview_element["type"] == "section_header"
 
-        commit_result = await service.commit(doc.id, session["pages"])
+        commit_result = await service.commit(
+            doc.id,
+            session_id=session["sessionId"],
+            draft_version=session["draftVersion"],
+        )
         assert commit_result["committed"] is True
 
         persisted = await service._analyses.find_latest_completed_by_document(doc.id)
@@ -173,6 +194,8 @@ class TestDocumentEditService:
     ):
         session = await service.apply_commands(
             doc.id,
+            session_id=(await service.get_session(doc.id))["sessionId"],
+            draft_version=0,
             commands=[
                 {
                     "action": "update_page_element",
@@ -185,7 +208,11 @@ class TestDocumentEditService:
         preview_element = _element_by_ref(session["pages"], "#/texts/12")
         assert preview_element["type"] == "title"
 
-        commit_result = await service.commit(doc.id, session["pages"])
+        commit_result = await service.commit(
+            doc.id,
+            session_id=session["sessionId"],
+            draft_version=session["draftVersion"],
+        )
         assert commit_result["committed"] is True
 
         persisted = await service._analyses.find_latest_completed_by_document(doc.id)
@@ -198,6 +225,8 @@ class TestDocumentEditService:
         with pytest.raises(DocumentEditConflictError) as exc:
             await service.apply_commands(
                 doc.id,
+                session_id=(await service.get_session(doc.id))["sessionId"],
+                draft_version=0,
                 commands=[
                     {
                         "action": "update_page_element",
@@ -208,6 +237,38 @@ class TestDocumentEditService:
             )
 
         assert "allowed: table" in str(exc.value)
+
+    async def test_rejects_stale_draft_version(self, service, doc, analysis):
+        session = await service.get_session(doc.id)
+
+        await service.apply_commands(
+            doc.id,
+            session_id=session["sessionId"],
+            draft_version=session["draftVersion"],
+            commands=[
+                {
+                    "action": "update_page_element",
+                    "targetRef": "#/texts/12",
+                    "payload": {"content": "First update"},
+                }
+            ],
+        )
+
+        with pytest.raises(DocumentEditConflictError) as exc:
+            await service.apply_commands(
+                doc.id,
+                session_id=session["sessionId"],
+                draft_version=session["draftVersion"],
+                commands=[
+                    {
+                        "action": "update_page_element",
+                        "targetRef": "#/texts/12",
+                        "payload": {"content": "Second update"},
+                    }
+                ],
+            )
+
+        assert "Draft version mismatch" in str(exc.value)
 
 
 def _element_by_ref(pages: list[dict], target_ref: str) -> dict:

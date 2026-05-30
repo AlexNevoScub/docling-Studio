@@ -100,7 +100,10 @@ export interface DocumentEditCommandInput {
 }
 
 export interface DocumentEditSession {
+  sessionId: string
   analysisId: string
+  baseAnalysisId: string
+  draftVersion: number
   pages: Page[]
   tree: DocTreeNode[]
   pendingCommands: DocumentEditCommand[]
@@ -150,6 +153,7 @@ export interface PageElement {
    * items that don't have one (rare). Lets callers correlate a bbox with
    * the matching graph node without fuzzy bbox matching. */
   self_ref?: string
+  draftRef?: string
 }
 
 // Backend serializes with snake_case (dataclasses.asdict)
@@ -194,6 +198,7 @@ export type Theme = 'dark' | 'light'
 /** Node in the parsed document tree returned by GET /api/documents/:id/tree */
 export interface DocTreeNode {
   ref: string
+  draftRef?: string
   type: string
   label: string
   children: DocTreeNode[]

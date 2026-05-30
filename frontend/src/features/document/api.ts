@@ -81,21 +81,24 @@ export function fetchDocumentEditSession(docId: string): Promise<DocumentEditSes
 
 export function applyDocumentEditCommands(
   docId: string,
+  sessionId: string,
+  draftVersion: number,
   commands: DocumentEditCommandInput[],
 ): Promise<DocumentEditSession> {
   return apiFetch<DocumentEditSession>(`/api/documents/${docId}/edits/commands`, {
     method: 'POST',
-    body: JSON.stringify({ commands }),
+    body: JSON.stringify({ sessionId, draftVersion, commands }),
   })
 }
 
 export function commitDocumentEdits(
   docId: string,
-  frontendPages: DocumentEditSession['pages'],
+  sessionId: string,
+  draftVersion: number,
 ): Promise<DocumentEditCommitResult> {
   return apiFetch<DocumentEditCommitResult>(`/api/documents/${docId}/edits/commit`, {
     method: 'POST',
-    body: JSON.stringify({ frontendPages }),
+    body: JSON.stringify({ sessionId, draftVersion }),
   })
 }
 

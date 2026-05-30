@@ -34,6 +34,9 @@ export const useDocumentStore = defineStore('document', () => {
   const workspaceActiveAnalysis = ref<Analysis | null>(null)
   const workspaceDraftPages = ref<Page[] | null>(null)
   const workspaceDraftTree = ref<DocTreeNode[] | null>(null)
+  const documentEditSessionId = ref<string | null>(null)
+  const documentEditBaseAnalysisId = ref<string | null>(null)
+  const documentEditDraftVersion = ref(0)
   const pendingDocumentCommands = ref<DocumentEditCommand[]>([])
   const documentEditSaving = ref(false)
   const documentEditCommitting = ref(false)
@@ -147,6 +150,9 @@ export const useDocumentStore = defineStore('document', () => {
     workspaceActiveAnalysis.value = null
     workspaceDraftPages.value = null
     workspaceDraftTree.value = null
+    documentEditSessionId.value = null
+    documentEditBaseAnalysisId.value = null
+    documentEditDraftVersion.value = 0
     pendingDocumentCommands.value = []
     try {
       const [doc, versions] = await Promise.all([
@@ -232,9 +238,15 @@ export const useDocumentStore = defineStore('document', () => {
     pendingDocumentCommands.value = []
     workspaceDraftPages.value = null
     workspaceDraftTree.value = null
+    documentEditSessionId.value = null
+    documentEditBaseAnalysisId.value = null
+    documentEditDraftVersion.value = 0
     if (!workspaceActiveAnalysis.value?.hasDocumentJson) return
     try {
       const session = await api.fetchDocumentEditSession(docId)
+      documentEditSessionId.value = session.sessionId
+      documentEditBaseAnalysisId.value = session.baseAnalysisId
+      documentEditDraftVersion.value = session.draftVersion
       pendingDocumentCommands.value = session.pendingCommands
       workspaceDraftPages.value = session.pendingCommands.length ? session.pages : null
       workspaceDraftTree.value = session.pendingCommands.length ? session.tree : null
@@ -248,22 +260,38 @@ export const useDocumentStore = defineStore('document', () => {
     targetRef: string,
     payload: DocumentEditCommandInput['payload'],
   ): Promise<void> {
+    if (!documentEditSessionId.value) {
+      await hydrateDocumentEditSession(docId)
+    }
+    if (!documentEditSessionId.value) {
+      throw new Error('Document edit session is not ready')
+    }
     const previousDraft = clonePages(workspaceDraftPages.value ?? workspaceBasePages.value)
     const previousDraftTree = cloneTree(workspaceDraftTree.value)
+    const previousDraftVersion = documentEditDraftVersion.value
     workspaceDraftPages.value = updatePageElementLocally(previousDraft, targetRef, payload)
     documentEditSaving.value = true
     try {
-      const session = await api.applyDocumentEditCommands(docId, [
-        {
-          action: 'update_page_element',
-          targetRef,
-          payload,
-        },
-      ])
+      const session = await api.applyDocumentEditCommands(
+        docId,
+        documentEditSessionId.value,
+        documentEditDraftVersion.value,
+        [
+          {
+            action: 'update_page_element',
+            targetRef,
+            payload,
+          },
+        ],
+      )
+      documentEditSessionId.value = session.sessionId
+      documentEditBaseAnalysisId.value = session.baseAnalysisId
+      documentEditDraftVersion.value = session.draftVersion
       workspaceDraftPages.value = session.pages
       workspaceDraftTree.value = session.tree
       pendingDocumentCommands.value = session.pendingCommands
     } catch (e) {
+      documentEditDraftVersion.value = previousDraftVersion
       workspaceDraftPages.value = pendingDocumentCommands.value.length ? previousDraft : null
       workspaceDraftTree.value = pendingDocumentCommands.value.length ? previousDraftTree : null
       workspaceError.value = (e as Error).message || 'Failed to update page element'
@@ -274,14 +302,21 @@ export const useDocumentStore = defineStore('document', () => {
   }
 
   async function commitPendingDocumentEdits(docId: string): Promise<DocumentEditCommitResult | null> {
-    if (!workspaceDraftPages.value) return null
+    if (!workspaceDraftPages.value || !documentEditSessionId.value) return null
     documentEditCommitting.value = true
     try {
-      const result = await api.commitDocumentEdits(docId, workspaceDraftPages.value)
+      const result = await api.commitDocumentEdits(
+        docId,
+        documentEditSessionId.value,
+        documentEditDraftVersion.value,
+      )
       workspaceDraftPages.value = result.committed ? null : result.pages
       workspaceDraftTree.value = result.committed ? null : result.tree
       if (result.committed && workspaceActiveAnalysis.value) {
         workspaceActiveAnalysis.value = await fetchAnalysis(workspaceActiveAnalysis.value.id)
+        documentEditSessionId.value = null
+        documentEditBaseAnalysisId.value = null
+        documentEditDraftVersion.value = 0
         pendingDocumentCommands.value = []
       }
       return result
@@ -298,6 +333,9 @@ export const useDocumentStore = defineStore('document', () => {
       await api.discardDocumentEdits(docId)
       workspaceDraftPages.value = null
       workspaceDraftTree.value = null
+      documentEditSessionId.value = null
+      documentEditBaseAnalysisId.value = null
+      documentEditDraftVersion.value = 0
       pendingDocumentCommands.value = []
     } catch (e) {
       workspaceError.value = (e as Error).message || 'Failed to discard document edits'
@@ -318,6 +356,9 @@ export const useDocumentStore = defineStore('document', () => {
     workspaceActiveAnalysis,
     workspaceDraftPages,
     workspaceDraftTree,
+    documentEditSessionId,
+    documentEditBaseAnalysisId,
+    documentEditDraftVersion,
     pendingDocumentCommands,
     documentEditSaving,
     documentEditCommitting,

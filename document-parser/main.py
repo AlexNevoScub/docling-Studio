@@ -32,6 +32,7 @@ from persistence.chunk_edit_repo import SqliteChunkEditRepository, SqliteChunkPu
 from persistence.chunk_repo import SqliteChunkRepository
 from persistence.database import get_connection, init_db
 from persistence.document_edit_repo import SqliteDocumentEditRepository
+from persistence.document_edit_session_repo import SqliteDocumentEditSessionRepository
 from persistence.document_repo import SqliteDocumentRepository
 from persistence.document_store_link_repo import SqliteDocumentStoreLinkRepository
 from persistence.store_repo import SqliteStoreRepository
@@ -318,6 +319,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     chunk_edit_repo = SqliteChunkEditRepository()
     chunk_push_repo = SqliteChunkPushRepository()
     document_edit_repo = SqliteDocumentEditRepository()
+    document_edit_session_repo = SqliteDocumentEditSessionRepository()
     app.state.chunk_repo = chunk_repo
     # `DocumentTreeReader` adapter — pure stateless shim, can be a singleton.
     from infra.docling_tree import DoclingTreeReader
@@ -340,6 +342,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         document_repo=document_repo,
         analysis_repo=analysis_repo,
         edit_repo=document_edit_repo,
+        session_repo=document_edit_session_repo,
     )
 
     # 0.6.1 (#audit-01) — GraphService orchestrates the two /graph endpoints

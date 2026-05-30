@@ -33,7 +33,10 @@ describe('useDocumentStore', () => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
     api.fetchDocumentEditSession.mockResolvedValue({
+      sessionId: 'sess-1',
       analysisId: 'a1',
+      baseAnalysisId: 'a1',
+      draftVersion: 0,
       pages: [],
       tree: [],
       pendingCommands: [],
@@ -238,7 +241,10 @@ describe('useDocumentStore', () => {
   })
 
   const mkEditSession = (overrides = {}) => ({
+    sessionId: 'sess-1',
     analysisId: 'a1',
+    baseAnalysisId: 'a1',
+    draftVersion: 1,
     pages: [],
     tree: [mkTreeNode()],
     pendingCommands: [
@@ -398,6 +404,8 @@ describe('useDocumentStore', () => {
     await store.hydrateDocumentEditSession('d1')
 
     expect(store.workspaceDraftTree).toEqual([mkTreeNode()])
+    expect(store.documentEditSessionId).toBe('sess-1')
+    expect(store.documentEditDraftVersion).toBe(1)
     expect(store.pendingDocumentCommands).toHaveLength(1)
   })
 
@@ -406,12 +414,13 @@ describe('useDocumentStore', () => {
     store.workspaceActiveAnalysis = mkAnalysis()
     store.workspaceDraftTree = [mkTreeNode({ label: 'Old draft' })]
     api.fetchDocumentEditSession.mockResolvedValue(
-      mkEditSession({ tree: [mkTreeNode({ label: 'Committed tree' })], pendingCommands: [] }),
+      mkEditSession({ tree: [mkTreeNode({ label: 'Committed tree' })], pendingCommands: [], draftVersion: 0 }),
     )
 
     await store.hydrateDocumentEditSession('d1')
 
     expect(store.workspaceDraftTree).toBeNull()
+    expect(store.documentEditDraftVersion).toBe(0)
     expect(store.pendingDocumentCommands).toEqual([])
   })
 
@@ -424,11 +433,14 @@ describe('useDocumentStore', () => {
     await store.discardPendingDocumentEdits('d1')
 
     expect(store.workspaceDraftTree).toBeNull()
+    expect(store.documentEditSessionId).toBeNull()
     expect(store.pendingDocumentCommands).toEqual([])
   })
 
   it('commitPendingDocumentEdits() adopts backend draft tree on inconsistent commit', async () => {
     const store = useDocumentStore()
+    store.documentEditSessionId = 'sess-1'
+    store.documentEditDraftVersion = 1
     store.workspaceDraftPages = [
       { page_number: 1, width: 600, height: 800, elements: [] },
     ]

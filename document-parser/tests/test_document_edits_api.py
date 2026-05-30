@@ -49,7 +49,10 @@ class TestDocumentEditSessionRoutes:
     def test_get_session_returns_tree(self, client, mock_service):
         mock_service.get_session = AsyncMock(
             return_value={
+                "sessionId": "sess-1",
                 "analysisId": "a-1",
+                "baseAnalysisId": "a-1",
+                "draftVersion": 0,
                 "pages": _pages(),
                 "tree": _tree(),
                 "pendingCommands": [_pending_command()],
@@ -60,13 +63,17 @@ class TestDocumentEditSessionRoutes:
 
         assert resp.status_code == 200
         body = resp.json()
+        assert body["sessionId"] == "sess-1"
         assert body["tree"] == _tree()
         assert body["pendingCommands"][0]["action"] == "update_page_element"
 
     def test_apply_commands_returns_tree(self, client, mock_service):
         mock_service.apply_commands = AsyncMock(
             return_value={
+                "sessionId": "sess-1",
                 "analysisId": "a-1",
+                "baseAnalysisId": "a-1",
+                "draftVersion": 1,
                 "pages": _pages(),
                 "tree": _tree("Updated heading"),
                 "pendingCommands": [_pending_command()],
@@ -76,18 +83,21 @@ class TestDocumentEditSessionRoutes:
         resp = client.post(
             "/api/documents/d-1/edits/commands",
             json={
+                "sessionId": "sess-1",
+                "draftVersion": 0,
                 "commands": [
                     {
                         "action": "update_page_element",
                         "targetRef": "#/texts/12",
                         "payload": {"content": "Updated content"},
                     }
-                ]
+                ],
             },
         )
 
         assert resp.status_code == 200
         body = resp.json()
+        assert body["draftVersion"] == 1
         assert body["tree"] == _tree("Updated heading")
         mock_service.apply_commands.assert_awaited_once()
 
@@ -104,7 +114,7 @@ class TestDocumentEditSessionRoutes:
 
         resp = client.post(
             "/api/documents/d-1/edits/commit",
-            json={"frontendPages": _pages()},
+            json={"sessionId": "sess-1", "draftVersion": 1},
         )
 
         assert resp.status_code == 200

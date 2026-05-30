@@ -18,6 +18,7 @@ if TYPE_CHECKING:
         ChunkEdit,
         ChunkPush,
         DocumentEdit,
+        DocumentEditSession,
         Document,
         DocumentStoreLink,
         Store,
@@ -198,6 +199,18 @@ class DocumentEditRepository(Protocol):
     async def mark_committed(self, edit_ids: list[str]) -> int: ...
 
     async def clear_pending_for_document(self, document_id: str) -> int: ...
+
+
+class DocumentEditSessionRepository(Protocol):
+    """Port for the active document draft session."""
+
+    async def insert(self, session: DocumentEditSession) -> None: ...
+
+    async def find_by_document(self, document_id: str) -> DocumentEditSession | None: ...
+
+    async def update(self, session: DocumentEditSession) -> None: ...
+
+    async def delete(self, session_id: str) -> bool: ...
 
 
 class AnalysisRepository(Protocol):

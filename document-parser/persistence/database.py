@@ -191,6 +191,19 @@ CREATE INDEX IF NOT EXISTS idx_document_edits_doc_at ON document_edits(document_
 CREATE INDEX IF NOT EXISTS idx_document_edits_doc_status_at
     ON document_edits(document_id, status, at);
 
+-- Active draft session metadata for document edits.
+CREATE TABLE IF NOT EXISTS document_edit_sessions (
+    id               TEXT PRIMARY KEY,
+    document_id      TEXT NOT NULL UNIQUE REFERENCES documents(id) ON DELETE CASCADE,
+    base_analysis_id TEXT NOT NULL REFERENCES analysis_jobs(id) ON DELETE CASCADE,
+    draft_version    INTEGER NOT NULL DEFAULT 0,
+    actor            TEXT NOT NULL DEFAULT 'system',
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_document_edit_sessions_doc
+    ON document_edit_sessions(document_id);
+
 -- Immutable push audit. Compound index covers the "last push for (doc,
 -- store)" lookup that drives the diff endpoint and the link upsert.
 CREATE TABLE IF NOT EXISTS chunk_pushes (

@@ -123,7 +123,10 @@ class DocumentEditCommandResponse(_CamelModel):
 
 
 class DocumentEditSessionResponse(_CamelModel):
+    session_id: str
     analysis_id: str
+    base_analysis_id: str
+    draft_version: int
     pages: list[dict] = Field(default_factory=list)
     tree: list[dict] = Field(default_factory=list)
     pending_commands: list[DocumentEditCommandResponse] = Field(default_factory=list)
@@ -136,11 +139,14 @@ class DocumentEditCommandRequest(_CamelModel):
 
 
 class ApplyDocumentEditCommandsRequest(_CamelModel):
+    session_id: str
+    draft_version: int
     commands: list[DocumentEditCommandRequest] = Field(default_factory=list)
 
 
 class CommitDocumentEditsRequest(_CamelModel):
-    frontend_pages: list[dict] = Field(default_factory=list)
+    session_id: str
+    draft_version: int
 
 
 class DocumentEditCommitResponse(_CamelModel):

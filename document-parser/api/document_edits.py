@@ -40,7 +40,10 @@ async def get_session(doc_id: str, service: ServiceDep) -> DocumentEditSessionRe
         _raise_for(e)
         raise
     return DocumentEditSessionResponse(
+        session_id=payload["sessionId"],
         analysis_id=payload["analysisId"],
+        base_analysis_id=payload["baseAnalysisId"],
+        draft_version=payload["draftVersion"],
         pages=payload["pages"],
         tree=payload["tree"],
         pending_commands=[DocumentEditCommandResponse(**cmd) for cmd in payload["pendingCommands"]],
@@ -56,13 +59,18 @@ async def apply_commands(
     try:
         payload = await service.apply_commands(
             doc_id,
+            session_id=body.session_id,
+            draft_version=body.draft_version,
             commands=[command.model_dump(by_alias=True) for command in body.commands],
         )
     except DocumentEditServiceError as e:
         _raise_for(e)
         raise
     return DocumentEditSessionResponse(
+        session_id=payload["sessionId"],
         analysis_id=payload["analysisId"],
+        base_analysis_id=payload["baseAnalysisId"],
+        draft_version=payload["draftVersion"],
         pages=payload["pages"],
         tree=payload["tree"],
         pending_commands=[DocumentEditCommandResponse(**cmd) for cmd in payload["pendingCommands"]],
@@ -76,7 +84,11 @@ async def commit_edits(
     service: ServiceDep,
 ) -> DocumentEditCommitResponse:
     try:
-        payload = await service.commit(doc_id, body.frontend_pages)
+        payload = await service.commit(
+            doc_id,
+            session_id=body.session_id,
+            draft_version=body.draft_version,
+        )
     except DocumentEditServiceError as e:
         _raise_for(e)
         raise

@@ -314,6 +314,19 @@ class DocumentEdit:
     status: DocumentEditStatus = DocumentEditStatus.PENDING
 
 
+@dataclass
+class DocumentEditSession:
+    """Active draft session anchored to one completed analysis snapshot."""
+
+    id: str
+    document_id: str
+    base_analysis_id: str
+    draft_version: int
+    actor: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class DocumentVersionKind(enum.StrEnum):
     """What triggered the version snapshot.
 

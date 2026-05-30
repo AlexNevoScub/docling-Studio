@@ -13,7 +13,8 @@ from docling_core.types.doc import DocItem, DoclingDocument, SectionHeaderItem, 
 from docling_core.types.doc.base import BoundingBox, CoordOrigin
 from docling_core.types.doc.labels import DocItemLabel
 
-from domain.models import DocumentEdit
+from domain.models import DocumentEdit, DocumentEditSession
+from domain.ports import DocumentEditSessionRepository
 from domain.value_objects import DocumentEditAction, DocumentEditStatus
 from infra.docling_tree import DoclingTreeReader
 from infra.local_converter import _extract_pages_detail
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
     from domain.ports import (
         AnalysisRepository,
         DocumentEditRepository,
+        DocumentEditSessionRepository,
         DocumentRepository,
         DocumentTreeReader,
     )
@@ -60,12 +62,14 @@ class DocumentEditService:
         document_repo: DocumentRepository,
         analysis_repo: AnalysisRepository,
         edit_repo: DocumentEditRepository,
+        session_repo: DocumentEditSessionRepository,
         tree_reader: DocumentTreeReader | None = None,
         actor: str = "user",
     ) -> None:
         self._documents = document_repo
         self._analyses = analysis_repo
         self._edits = edit_repo
+        self._sessions = session_repo
         self._tree = tree_reader or DoclingTreeReader()
         self._actor = actor
 
@@ -73,10 +77,14 @@ class DocumentEditService:
         await self._require_document(document_id)
         analysis = await self._require_analysis(document_id)
         edits = await self._edits.find_pending_for_document(document_id)
+        session = await self._get_or_create_session(document_id, analysis.id, edits=edits)
         document = self._load_doc(analysis.document_json)
         self._apply_edits(document, edits)
         return {
+            "sessionId": session.id,
             "analysisId": analysis.id,
+            "baseAnalysisId": session.base_analysis_id,
+            "draftVersion": session.draft_version,
             "pages": self._render_pages(document),
             "tree": self._render_tree(document),
             "pendingCommands": [self._edit_to_dict(edit) for edit in edits],
@@ -86,12 +94,21 @@ class DocumentEditService:
         self,
         document_id: str,
         *,
+        session_id: str,
+        draft_version: int,
         commands: list[dict[str, Any]],
         actor: str | None = None,
     ) -> dict[str, Any]:
         await self._require_document(document_id)
         analysis = await self._require_analysis(document_id)
         pending = await self._edits.find_pending_for_document(document_id)
+        session = await self._require_session(
+            document_id,
+            analysis.id,
+            session_id=session_id,
+            draft_version=draft_version,
+            edits=pending,
+        )
         new_edits = [
             self._command_to_edit(document_id, analysis.id, command, actor=actor or self._actor)
             for command in commands
@@ -99,8 +116,14 @@ class DocumentEditService:
         preview_document = self._preview_document(analysis, [*pending, *new_edits])
         for edit in new_edits:
             await self._edits.insert(edit)
+        session.draft_version += 1
+        session.updated_at = _utcnow()
+        await self._sessions.update(session)
         return {
+            "sessionId": session.id,
             "analysisId": analysis.id,
+            "baseAnalysisId": session.base_analysis_id,
+            "draftVersion": session.draft_version,
             "pages": self._render_pages(preview_document),
             "tree": self._render_tree(preview_document),
             "pendingCommands": [self._edit_to_dict(cmd) for cmd in [*pending, *new_edits]],
@@ -109,12 +132,22 @@ class DocumentEditService:
     async def commit(
         self,
         document_id: str,
-        frontend_pages: list[dict[str, Any]],
+        *,
+        session_id: str,
+        draft_version: int,
     ) -> dict[str, Any]:
         await self._require_document(document_id)
         analysis = await self._require_analysis(document_id)
         pending = await self._edits.find_pending_for_document(document_id)
+        session = await self._require_session(
+            document_id,
+            analysis.id,
+            session_id=session_id,
+            draft_version=draft_version,
+            edits=pending,
+        )
         if not pending:
+            await self._sessions.delete(session.id)
             return {
                 "committed": True,
                 "consistent": True,
@@ -127,15 +160,6 @@ class DocumentEditService:
         self._apply_edits(document, pending)
         backend_pages = self._render_pages(document)
         backend_tree = self._render_tree(document)
-        differences = _diff_pages(frontend_pages, backend_pages)
-        if differences:
-            return {
-                "committed": False,
-                "consistent": False,
-                "differences": differences,
-                "pages": backend_pages,
-                "tree": backend_tree,
-            }
 
         analysis.document_json = json.dumps(document.export_to_dict())
         analysis.pages_json = json.dumps(backend_pages)
@@ -144,6 +168,7 @@ class DocumentEditService:
         analysis.completed_at = _utcnow()
         await self._analyses.update_status(analysis)
         await self._edits.mark_committed([edit.id for edit in pending])
+        await self._sessions.delete(session.id)
         return {
             "committed": True,
             "consistent": True,
@@ -154,7 +179,11 @@ class DocumentEditService:
 
     async def discard(self, document_id: str) -> int:
         await self._require_document(document_id)
-        return await self._edits.clear_pending_for_document(document_id)
+        session = await self._sessions.find_by_document(document_id)
+        cleared = await self._edits.clear_pending_for_document(document_id)
+        if session is not None:
+            await self._sessions.delete(session.id)
+        return cleared
 
     async def _require_document(self, document_id: str) -> Document:
         doc = await self._documents.find_by_id(document_id)
@@ -174,6 +203,54 @@ class DocumentEditService:
         self, analysis: AnalysisJob, edits: list[DocumentEdit]
     ) -> list[dict[str, Any]]:
         return self._render_pages(self._preview_document(analysis, edits))
+
+    async def _get_or_create_session(
+        self,
+        document_id: str,
+        analysis_id: str,
+        *,
+        edits: list[DocumentEdit],
+    ) -> DocumentEditSession:
+        session = await self._sessions.find_by_document(document_id)
+        if session is None:
+            session = DocumentEditSession(
+                id=_new_id(),
+                document_id=document_id,
+                base_analysis_id=analysis_id,
+                draft_version=0,
+                actor=self._actor,
+                created_at=_utcnow(),
+                updated_at=_utcnow(),
+            )
+            await self._sessions.insert(session)
+            return session
+        if session.base_analysis_id == analysis_id:
+            return session
+        if edits:
+            raise DocumentEditConflictError(
+                "Draft session is stale: the active analysis changed while edits were pending",
+            )
+        session.base_analysis_id = analysis_id
+        session.draft_version = 0
+        session.updated_at = _utcnow()
+        await self._sessions.update(session)
+        return session
+
+    async def _require_session(
+        self,
+        document_id: str,
+        analysis_id: str,
+        *,
+        session_id: str,
+        draft_version: int,
+        edits: list[DocumentEdit],
+    ) -> DocumentEditSession:
+        session = await self._get_or_create_session(document_id, analysis_id, edits=edits)
+        if session.id != session_id:
+            raise DocumentEditConflictError("Draft session mismatch; refresh the document editor")
+        if session.draft_version != draft_version:
+            raise DocumentEditConflictError("Draft version mismatch; refresh the document editor")
+        return session
 
     def _preview_document(
         self, analysis: AnalysisJob, edits: list[DocumentEdit]
@@ -323,10 +400,27 @@ class DocumentEditService:
 
     def _render_pages(self, document: DoclingDocument) -> list[dict[str, Any]]:
         pages, _skipped = _extract_pages_detail(SimpleNamespace(document=document))
-        return [asdict(page) for page in pages]
+        rendered = [asdict(page) for page in pages]
+        for page in rendered:
+            for element in page.get("elements", []):
+                draft_ref = element.get("self_ref") or ""
+                if draft_ref:
+                    element["draftRef"] = draft_ref
+        return rendered
 
     def _render_tree(self, document: DoclingDocument) -> list[dict[str, Any]]:
-        return _build_tree_nodes(document.export_to_dict(), self._tree)
+        tree = _build_tree_nodes(document.export_to_dict(), self._tree)
+        self._attach_tree_draft_refs(tree)
+        return tree
+
+    def _attach_tree_draft_refs(self, nodes: list[dict[str, Any]]) -> None:
+        for node in nodes:
+            ref = str(node.get("ref") or "")
+            if ref:
+                node["draftRef"] = ref
+            children = node.get("children")
+            if isinstance(children, list):
+                self._attach_tree_draft_refs(children)
 
     def _edit_to_dict(self, edit: DocumentEdit) -> dict[str, Any]:
         return {
@@ -339,58 +433,6 @@ class DocumentEditService:
             "at": str(edit.at),
             "status": edit.status.value,
         }
-
-
-def _diff_pages(
-    frontend_pages: list[dict[str, Any]], backend_pages: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    frontend_by_ref = _elements_by_ref(frontend_pages)
-    backend_by_ref = _elements_by_ref(backend_pages)
-    differences: list[dict[str, Any]] = []
-    for ref in sorted(set(frontend_by_ref) | set(backend_by_ref)):
-        frontend = frontend_by_ref.get(ref)
-        backend = backend_by_ref.get(ref)
-        if frontend is None or backend is None:
-            differences.append(
-                {"ref": ref, "field": "presence", "frontend": frontend, "backend": backend}
-            )
-            continue
-        for field in ("type", "content", "level"):
-            if frontend.get(field) != backend.get(field):
-                differences.append(
-                    {
-                        "ref": ref,
-                        "field": field,
-                        "frontend": frontend.get(field),
-                        "backend": backend.get(field),
-                    }
-                )
-        if not _bbox_equal(frontend.get("bbox"), backend.get("bbox")):
-            differences.append(
-                {
-                    "ref": ref,
-                    "field": "bbox",
-                    "frontend": frontend.get("bbox"),
-                    "backend": backend.get("bbox"),
-                }
-            )
-    return differences
-
-
-def _elements_by_ref(pages: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
-    for page in pages:
-        for element in page.get("elements", []):
-            ref = element.get("self_ref") or ""
-            if ref:
-                out[ref] = element
-    return out
-
-
-def _bbox_equal(left: Any, right: Any, tolerance: float = 0.001) -> bool:
-    if not isinstance(left, list) or not isinstance(right, list) or len(left) != len(right):
-        return left == right
-    return all(abs(float(a) - float(b)) <= tolerance for a, b in zip(left, right, strict=False))
 
 
 _TYPE_TO_LABEL: dict[str, DocItemLabel] = {
