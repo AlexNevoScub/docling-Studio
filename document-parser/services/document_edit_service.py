@@ -276,6 +276,9 @@ class DocumentEditService:
             if edit.action is DocumentEditAction.UPDATE_PAGE_ELEMENT:
                 self._apply_update_page_element(document, edit, bindings)
                 continue
+            if edit.action is DocumentEditAction.MOVE_ITEM_BEFORE:
+                document = self._apply_move_item_before(document, edit, bindings)
+                continue
             if edit.action is DocumentEditAction.MOVE_ITEM_AFTER:
                 document = self._apply_move_item_after(document, edit, bindings)
                 continue
@@ -360,6 +363,20 @@ class DocumentEditService:
                 )
             return
 
+        if action is DocumentEditAction.MOVE_ITEM_BEFORE:
+            allowed = {"beforeTargetRef"}
+            unknown = sorted(set(payload) - allowed)
+            if unknown:
+                raise DocumentEditConflictError(
+                    f"Unsupported move_item_before payload fields: {', '.join(unknown)}"
+                )
+            before_target_ref = payload.get("beforeTargetRef")
+            if not isinstance(before_target_ref, str) or not before_target_ref:
+                raise DocumentEditConflictError(
+                    "move_item_before payload.beforeTargetRef is required"
+                )
+            return
+
         raise DocumentEditConflictError(f"Unsupported document edit action: {action.value}")
 
     def _apply_update_page_element(
@@ -392,6 +409,23 @@ class DocumentEditService:
         if target_ref == after_target_ref:
             raise DocumentEditConflictError("move_item_after targetRef cannot equal afterTargetRef")
         return self._reorder_item_after(document, target_ref, after_target_ref)
+
+    def _apply_move_item_before(
+        self,
+        document: DoclingDocument,
+        edit: DocumentEdit,
+        bindings: dict[str, DraftNodeBinding],
+    ) -> DoclingDocument:
+        target_ref = self._resolve_self_ref(edit.target_ref, bindings)
+        before_target_ref = self._resolve_self_ref(
+            str(edit.payload.get("beforeTargetRef") or ""),
+            bindings,
+        )
+        if target_ref == before_target_ref:
+            raise DocumentEditConflictError(
+                "move_item_before targetRef cannot equal beforeTargetRef"
+            )
+        return self._reorder_item_before(document, target_ref, before_target_ref)
 
     def _apply_content(self, item: DocItem, target_ref: str, content: Any) -> None:
         if not hasattr(item, "text"):
@@ -558,20 +592,51 @@ class DocumentEditService:
         target_ref: str,
         after_target_ref: str,
     ) -> DoclingDocument:
+        return self._reorder_item_relative(
+            document,
+            target_ref,
+            anchor_ref=after_target_ref,
+            insert_after=True,
+            action_name="move_item_after",
+        )
+
+    def _reorder_item_before(
+        self,
+        document: DoclingDocument,
+        target_ref: str,
+        before_target_ref: str,
+    ) -> DoclingDocument:
+        return self._reorder_item_relative(
+            document,
+            target_ref,
+            anchor_ref=before_target_ref,
+            insert_after=False,
+            action_name="move_item_before",
+        )
+
+    def _reorder_item_relative(
+        self,
+        document: DoclingDocument,
+        target_ref: str,
+        *,
+        anchor_ref: str,
+        insert_after: bool,
+        action_name: str,
+    ) -> DoclingDocument:
         document_dict = document.export_to_dict()
         nodes_by_ref = self._index_document_nodes(document_dict)
         target_node = nodes_by_ref.get(target_ref)
-        after_node = nodes_by_ref.get(after_target_ref)
+        anchor_node = nodes_by_ref.get(anchor_ref)
         if target_node is None:
             raise DocumentEditNotFoundError(f"Document item not found: {target_ref}")
-        if after_node is None:
-            raise DocumentEditNotFoundError(f"Document item not found: {after_target_ref}")
+        if anchor_node is None:
+            raise DocumentEditNotFoundError(f"Document item not found: {anchor_ref}")
 
         target_parent_ref = self._parent_ref(target_node)
-        after_parent_ref = self._parent_ref(after_node)
-        if not target_parent_ref or not after_parent_ref or target_parent_ref != after_parent_ref:
+        anchor_parent_ref = self._parent_ref(anchor_node)
+        if not target_parent_ref or not anchor_parent_ref or target_parent_ref != anchor_parent_ref:
             raise DocumentEditConflictError(
-                "move_item_after currently supports sibling reordering within one parent"
+                f"{action_name} currently supports sibling reordering within one parent"
             )
 
         parent_node = nodes_by_ref.get(target_parent_ref)
@@ -586,11 +651,12 @@ class DocumentEditService:
             )
 
         target_index = self._child_index(children, target_ref)
-        after_index = self._child_index(children, after_target_ref)
+        anchor_index = self._child_index(children, anchor_ref)
         target_child = children.pop(target_index)
-        if target_index < after_index:
-            after_index -= 1
-        children.insert(after_index + 1, target_child)
+        if target_index < anchor_index:
+            anchor_index -= 1
+        insert_index = anchor_index + 1 if insert_after else anchor_index
+        children.insert(insert_index, target_child)
         return DoclingDocument.model_validate(document_dict)
 
     def _index_document_nodes(self, value: Any) -> dict[str, dict[str, Any]]:
