@@ -295,6 +295,83 @@ class TestDocumentEditService:
         assert second_ref == first_ref
         assert _tree_draft_ref_by_ref(first["tree"], "#/texts/12") == first_ref
 
+    async def test_merge_items_merges_adjacent_text_siblings_and_commits(
+        self, service, repos, doc, analysis
+    ):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/11")
+        trailing_target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/12")
+        leading_before = _element_by_ref(initial_session["pages"], "#/texts/11")["content"]
+        trailing_before = _element_by_ref(initial_session["pages"], "#/texts/12")["content"]
+
+        session = await service.apply_commands(
+            doc.id,
+            session_id=initial_session["sessionId"],
+            draft_version=initial_session["draftVersion"],
+            commands=[
+                {
+                    "action": "merge_items",
+                    "targetRef": target_ref,
+                    "payload": {
+                        "trailingTargetRef": trailing_target_ref,
+                        "separator": " ",
+                    },
+                }
+            ],
+        )
+
+        merged_element = _element_by_ref(session["pages"], "#/texts/11")
+        assert merged_element["content"] == f"{leading_before} {trailing_before}"
+        assert _tree_draft_ref_by_ref(session["tree"], "#/texts/11") == target_ref
+        assert "#/texts/12" not in _root_tree_refs(session["tree"])
+        assert not _has_element_ref(session["pages"], "#/texts/12")
+
+        commit_result = await service.commit(
+            doc.id,
+            session_id=session["sessionId"],
+            draft_version=session["draftVersion"],
+        )
+
+        assert commit_result["committed"] is True
+        assert _element_by_ref(commit_result["pages"], "#/texts/11")["content"] == (
+            f"{leading_before} {trailing_before}"
+        )
+        assert "#/texts/12" not in _root_tree_refs(commit_result["tree"])
+
+        persisted = await repos["analyses"].find_latest_completed_by_document(doc.id)
+        assert persisted is not None
+        persisted_doc = json.loads(persisted.document_json or "{}")
+        leading_text = _text_item_by_ref(persisted_doc, "#/texts/11")
+        assert leading_text["text"] == f"{leading_before} {trailing_before}"
+        assert leading_text["orig"] == f"{leading_before} {trailing_before}"
+        assert not any(
+            item.get("self_ref") == "#/texts/12" for item in persisted_doc.get("texts", [])
+        )
+        assert "#/texts/12" not in _child_ref_order(persisted_doc["body"].get("children", []))
+
+    async def test_rejects_merge_items_when_target_is_not_leading_adjacent_sibling(
+        self, service, doc, analysis
+    ):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/12")
+        trailing_target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/11")
+
+        with pytest.raises(DocumentEditConflictError) as exc:
+            await service.apply_commands(
+                doc.id,
+                session_id=initial_session["sessionId"],
+                draft_version=initial_session["draftVersion"],
+                commands=[
+                    {
+                        "action": "merge_items",
+                        "targetRef": target_ref,
+                        "payload": {"trailingTargetRef": trailing_target_ref},
+                    }
+                ],
+            )
+
+        assert "requires adjacent siblings with targetRef leading" in str(exc.value)
+
     async def test_move_item_after_reorders_siblings_in_preview_and_commit(
         self, service, repos, doc, analysis
     ):
@@ -493,6 +570,14 @@ def _text_item_by_ref(document_json: dict, target_ref: str) -> dict:
         if item.get("self_ref") == target_ref:
             return item
     raise AssertionError(f"Text item not found in document_json: {target_ref}")
+
+
+def _has_element_ref(pages: list[dict], target_ref: str) -> bool:
+    for page in pages:
+        for element in page.get("elements", []):
+            if element.get("self_ref") == target_ref:
+                return True
+    return False
 
 
 def _draft_ref_by_self_ref(pages: list[dict], self_ref: str) -> str:

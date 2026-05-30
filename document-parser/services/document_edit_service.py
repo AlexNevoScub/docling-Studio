@@ -276,6 +276,9 @@ class DocumentEditService:
             if edit.action is DocumentEditAction.UPDATE_PAGE_ELEMENT:
                 self._apply_update_page_element(document, edit, bindings)
                 continue
+            if edit.action is DocumentEditAction.MERGE_ITEMS:
+                document = self._apply_merge_items(document, edit, bindings)
+                continue
             if edit.action is DocumentEditAction.MOVE_ITEM_BEFORE:
                 document = self._apply_move_item_before(document, edit, bindings)
                 continue
@@ -366,6 +369,21 @@ class DocumentEditService:
                 )
             return
 
+        if action is DocumentEditAction.MERGE_ITEMS:
+            allowed = {"trailingTargetRef", "separator"}
+            unknown = sorted(set(payload) - allowed)
+            if unknown:
+                raise DocumentEditConflictError(
+                    f"Unsupported merge_items payload fields: {', '.join(unknown)}"
+                )
+            trailing_target_ref = payload.get("trailingTargetRef")
+            if not isinstance(trailing_target_ref, str) or not trailing_target_ref:
+                raise DocumentEditConflictError("merge_items payload.trailingTargetRef is required")
+            separator = payload.get("separator")
+            if separator is not None and not isinstance(separator, str):
+                raise DocumentEditConflictError("merge_items payload.separator must be a string")
+            return
+
         if action is DocumentEditAction.MOVE_ITEM_BEFORE:
             allowed = {"beforeTargetRef"}
             unknown = sorted(set(payload) - allowed)
@@ -429,6 +447,22 @@ class DocumentEditService:
         if target_ref == after_target_ref:
             raise DocumentEditConflictError("move_item_after targetRef cannot equal afterTargetRef")
         return self._reorder_item_after(document, target_ref, after_target_ref)
+
+    def _apply_merge_items(
+        self,
+        document: DoclingDocument,
+        edit: DocumentEdit,
+        bindings: dict[str, DraftNodeBinding],
+    ) -> DoclingDocument:
+        target_ref = self._resolve_self_ref(edit.target_ref, bindings)
+        trailing_target_ref = self._resolve_self_ref(
+            str(edit.payload.get("trailingTargetRef") or ""),
+            bindings,
+        )
+        if target_ref == trailing_target_ref:
+            raise DocumentEditConflictError("merge_items targetRef cannot equal trailingTargetRef")
+        separator = str(edit.payload.get("separator") or "")
+        return self._merge_items(document, target_ref, trailing_target_ref, separator=separator)
 
     def _apply_move_item_before(
         self,
@@ -636,6 +670,68 @@ class DocumentEditService:
             action_name="move_item_after",
         )
 
+    def _merge_items(
+        self,
+        document: DoclingDocument,
+        target_ref: str,
+        trailing_target_ref: str,
+        *,
+        separator: str,
+    ) -> DoclingDocument:
+        leading_item = self._find_item(document, target_ref)
+        trailing_item = self._find_item(document, trailing_target_ref)
+        if not isinstance(leading_item, TextItem) or not isinstance(trailing_item, TextItem):
+            raise DocumentEditConflictError("merge_items currently supports text items only")
+
+        document_dict = document.export_to_dict()
+        nodes_by_ref = self._index_document_nodes(document_dict)
+        leading_node = nodes_by_ref.get(target_ref)
+        trailing_node = nodes_by_ref.get(trailing_target_ref)
+        if leading_node is None:
+            raise DocumentEditNotFoundError(f"Document item not found: {target_ref}")
+        if trailing_node is None:
+            raise DocumentEditNotFoundError(f"Document item not found: {trailing_target_ref}")
+
+        leading_parent_ref = self._parent_ref(leading_node)
+        trailing_parent_ref = self._parent_ref(trailing_node)
+        if (
+            not leading_parent_ref
+            or not trailing_parent_ref
+            or leading_parent_ref != trailing_parent_ref
+        ):
+            raise DocumentEditConflictError(
+                "merge_items currently supports sibling text items within one parent"
+            )
+
+        parent_node = nodes_by_ref.get(leading_parent_ref)
+        if parent_node is None:
+            raise DocumentEditConflictError(
+                f"Parent node not found for merge: {leading_parent_ref}"
+            )
+        children = parent_node.get("children")
+        if not isinstance(children, list):
+            raise DocumentEditConflictError(
+                f"Parent does not expose mergeable children: {leading_parent_ref}"
+            )
+
+        leading_index = self._child_index(children, target_ref)
+        trailing_index = self._child_index(children, trailing_target_ref)
+        if leading_index + 1 != trailing_index:
+            raise DocumentEditConflictError(
+                "merge_items currently requires adjacent siblings with targetRef leading"
+            )
+
+        leading_text = str(leading_node.get("text") or "")
+        trailing_text = str(trailing_node.get("text") or "")
+        merged_text = f"{leading_text}{separator}{trailing_text}"
+        leading_node["text"] = merged_text
+        if "orig" in leading_node:
+            leading_node["orig"] = merged_text
+
+        children.pop(trailing_index)
+        self._remove_text_item_from_document_dict(document_dict, trailing_target_ref)
+        return DoclingDocument.model_validate(document_dict)
+
     def _reorder_item_before(
         self,
         document: DoclingDocument,
@@ -749,6 +845,20 @@ class DocumentEditService:
         next_children.insert(insert_index, target_child)
         target_node["parent"] = {"$ref": parent_target_ref}
         return DoclingDocument.model_validate(document_dict)
+
+    def _remove_text_item_from_document_dict(
+        self,
+        document_dict: dict[str, Any],
+        target_ref: str,
+    ) -> None:
+        texts = document_dict.get("texts")
+        if not isinstance(texts, list):
+            raise DocumentEditConflictError("Document does not expose a texts array")
+        for index, item in enumerate(texts):
+            if isinstance(item, dict) and item.get("self_ref") == target_ref:
+                texts.pop(index)
+                return
+        raise DocumentEditNotFoundError(f"Document item not found: {target_ref}")
 
     def _index_document_nodes(self, value: Any) -> dict[str, dict[str, Any]]:
         nodes: dict[str, dict[str, Any]] = {}
@@ -896,16 +1006,11 @@ def _build_text_family_item(item: TextItem, next_label: DocItemLabel) -> TextIte
 def _replace_text_item_in_document(
     document: DoclingDocument, old_item: TextItem, new_item: TextItem
 ) -> None:
-    path = old_item.self_ref.split("/")
-    if len(path) != 3 or path[1] != "texts":
-        raise DocumentEditConflictError(
-            f"Unsupported text item ref for type replacement: {old_item.self_ref}"
-        )
-    try:
-        index = int(path[2])
-    except ValueError as exc:
-        raise DocumentEditConflictError(
-            f"Unsupported text item ref for type replacement: {old_item.self_ref}"
-        ) from exc
-    # Mutate the canonical texts array in place so the self_ref and tree references stay stable.
-    document.texts[index] = new_item
+    for index, item in enumerate(document.texts):
+        if getattr(item, "self_ref", "") == old_item.self_ref:
+            # Mutate the canonical texts array in place so the self_ref and tree references stay stable.
+            document.texts[index] = new_item
+            return
+    raise DocumentEditConflictError(
+        f"Unsupported text item ref for type replacement: {old_item.self_ref}"
+    )
