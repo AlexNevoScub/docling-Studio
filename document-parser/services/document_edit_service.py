@@ -82,7 +82,7 @@ class DocumentEditService:
         session = await self._get_or_create_session(document_id, analysis.id, edits=edits)
         document = self._load_doc(analysis.document_json)
         bindings = await self._ensure_bindings(session, document)
-        self._apply_edits(document, edits, bindings)
+        document = self._apply_edits(document, edits, bindings)
         return {
             "sessionId": session.id,
             "analysisId": analysis.id,
@@ -162,7 +162,7 @@ class DocumentEditService:
 
         document = self._load_doc(analysis.document_json)
         bindings = await self._ensure_bindings(session, document)
-        self._apply_edits(document, pending, bindings)
+        document = self._apply_edits(document, pending, bindings)
         backend_pages = self._render_pages(document, bindings)
         backend_tree = self._render_tree(document, bindings)
 
@@ -259,8 +259,7 @@ class DocumentEditService:
         bindings: dict[str, DraftNodeBinding],
     ) -> DoclingDocument:
         document = self._load_doc(analysis.document_json)
-        self._apply_edits(document, edits, bindings)
-        return document
+        return self._apply_edits(document, edits, bindings)
 
     def _load_doc(self, raw_document_json: str | None) -> DoclingDocument:
         if not raw_document_json:
@@ -272,10 +271,18 @@ class DocumentEditService:
         document: DoclingDocument,
         edits: list[DocumentEdit],
         bindings: dict[str, DraftNodeBinding],
-    ) -> None:
+    ) -> DoclingDocument:
         for edit in edits:
             if edit.action is DocumentEditAction.UPDATE_PAGE_ELEMENT:
                 self._apply_update_page_element(document, edit, bindings)
+                continue
+            if edit.action is DocumentEditAction.MOVE_ITEM_AFTER:
+                document = self._apply_move_item_after(document, edit, bindings)
+                continue
+            raise DocumentEditConflictError(
+                f"Unsupported document edit action: {edit.action.value}"
+            )
+        return document
 
     def _command_to_edit(
         self,
@@ -306,36 +313,54 @@ class DocumentEditService:
         )
 
     def _validate_payload(self, action: DocumentEditAction, payload: dict[str, Any]) -> None:
-        if action is not DocumentEditAction.UPDATE_PAGE_ELEMENT:
-            raise DocumentEditConflictError(f"Unsupported document edit action: {action.value}")
-        allowed = {"content", "bbox", "type"}
-        unknown = sorted(set(payload) - allowed)
-        if unknown:
-            raise DocumentEditConflictError(
-                f"Unsupported update_page_element payload fields: {', '.join(unknown)}"
-            )
-        if not payload:
-            raise DocumentEditConflictError("update_page_element payload cannot be empty")
-        if (
-            "content" in payload
-            and payload["content"] is not None
-            and not isinstance(payload["content"], str)
-        ):
-            raise DocumentEditConflictError("payload.content must be a string")
-        if (
-            "type" in payload
-            and payload["type"] is not None
-            and not isinstance(payload["type"], str)
-        ):
-            raise DocumentEditConflictError("payload.type must be a string")
-        if "bbox" in payload:
-            bbox = payload["bbox"]
-            if not isinstance(bbox, list) or len(bbox) != 4:
-                raise DocumentEditConflictError("payload.bbox must be a 4-number list")
-            try:
-                [float(value) for value in bbox]
-            except (TypeError, ValueError) as exc:
-                raise DocumentEditConflictError("payload.bbox must contain only numbers") from exc
+        if action is DocumentEditAction.UPDATE_PAGE_ELEMENT:
+            allowed = {"content", "bbox", "type"}
+            unknown = sorted(set(payload) - allowed)
+            if unknown:
+                raise DocumentEditConflictError(
+                    f"Unsupported update_page_element payload fields: {', '.join(unknown)}"
+                )
+            if not payload:
+                raise DocumentEditConflictError("update_page_element payload cannot be empty")
+            if (
+                "content" in payload
+                and payload["content"] is not None
+                and not isinstance(payload["content"], str)
+            ):
+                raise DocumentEditConflictError("payload.content must be a string")
+            if (
+                "type" in payload
+                and payload["type"] is not None
+                and not isinstance(payload["type"], str)
+            ):
+                raise DocumentEditConflictError("payload.type must be a string")
+            if "bbox" in payload:
+                bbox = payload["bbox"]
+                if not isinstance(bbox, list) or len(bbox) != 4:
+                    raise DocumentEditConflictError("payload.bbox must be a 4-number list")
+                try:
+                    [float(value) for value in bbox]
+                except (TypeError, ValueError) as exc:
+                    raise DocumentEditConflictError(
+                        "payload.bbox must contain only numbers"
+                    ) from exc
+            return
+
+        if action is DocumentEditAction.MOVE_ITEM_AFTER:
+            allowed = {"afterTargetRef"}
+            unknown = sorted(set(payload) - allowed)
+            if unknown:
+                raise DocumentEditConflictError(
+                    f"Unsupported move_item_after payload fields: {', '.join(unknown)}"
+                )
+            after_target_ref = payload.get("afterTargetRef")
+            if not isinstance(after_target_ref, str) or not after_target_ref:
+                raise DocumentEditConflictError(
+                    "move_item_after payload.afterTargetRef is required"
+                )
+            return
+
+        raise DocumentEditConflictError(f"Unsupported document edit action: {action.value}")
 
     def _apply_update_page_element(
         self,
@@ -352,6 +377,21 @@ class DocumentEditService:
             self._apply_bbox(document, item, payload["bbox"])
         if "type" in payload:
             self._apply_type(document, item, target_ref, payload.get("type"))
+
+    def _apply_move_item_after(
+        self,
+        document: DoclingDocument,
+        edit: DocumentEdit,
+        bindings: dict[str, DraftNodeBinding],
+    ) -> DoclingDocument:
+        target_ref = self._resolve_self_ref(edit.target_ref, bindings)
+        after_target_ref = self._resolve_self_ref(
+            str(edit.payload.get("afterTargetRef") or ""),
+            bindings,
+        )
+        if target_ref == after_target_ref:
+            raise DocumentEditConflictError("move_item_after targetRef cannot equal afterTargetRef")
+        return self._reorder_item_after(document, target_ref, after_target_ref)
 
     def _apply_content(self, item: DocItem, target_ref: str, content: Any) -> None:
         if not hasattr(item, "text"):
@@ -511,6 +551,79 @@ class DocumentEditService:
                 raise DocumentEditConflictError(f"Draft target is no longer bound: {target_ref}")
             return binding.self_ref
         return target_ref
+
+    def _reorder_item_after(
+        self,
+        document: DoclingDocument,
+        target_ref: str,
+        after_target_ref: str,
+    ) -> DoclingDocument:
+        document_dict = document.export_to_dict()
+        nodes_by_ref = self._index_document_nodes(document_dict)
+        target_node = nodes_by_ref.get(target_ref)
+        after_node = nodes_by_ref.get(after_target_ref)
+        if target_node is None:
+            raise DocumentEditNotFoundError(f"Document item not found: {target_ref}")
+        if after_node is None:
+            raise DocumentEditNotFoundError(f"Document item not found: {after_target_ref}")
+
+        target_parent_ref = self._parent_ref(target_node)
+        after_parent_ref = self._parent_ref(after_node)
+        if not target_parent_ref or not after_parent_ref or target_parent_ref != after_parent_ref:
+            raise DocumentEditConflictError(
+                "move_item_after currently supports sibling reordering within one parent"
+            )
+
+        parent_node = nodes_by_ref.get(target_parent_ref)
+        if parent_node is None:
+            raise DocumentEditConflictError(
+                f"Parent node not found for reorder: {target_parent_ref}"
+            )
+        children = parent_node.get("children")
+        if not isinstance(children, list):
+            raise DocumentEditConflictError(
+                f"Parent does not expose reorderable children: {target_parent_ref}"
+            )
+
+        target_index = self._child_index(children, target_ref)
+        after_index = self._child_index(children, after_target_ref)
+        target_child = children.pop(target_index)
+        if target_index < after_index:
+            after_index -= 1
+        children.insert(after_index + 1, target_child)
+        return DoclingDocument.model_validate(document_dict)
+
+    def _index_document_nodes(self, value: Any) -> dict[str, dict[str, Any]]:
+        nodes: dict[str, dict[str, Any]] = {}
+
+        def visit(node: Any) -> None:
+            if isinstance(node, dict):
+                self_ref = node.get("self_ref")
+                if isinstance(self_ref, str) and self_ref:
+                    nodes[self_ref] = node
+                for child in node.values():
+                    visit(child)
+                return
+            if isinstance(node, list):
+                for child in node:
+                    visit(child)
+
+        visit(value)
+        return nodes
+
+    def _parent_ref(self, node: dict[str, Any]) -> str:
+        parent = node.get("parent")
+        if isinstance(parent, dict):
+            parent_ref = parent.get("$ref")
+            if isinstance(parent_ref, str):
+                return parent_ref
+        return ""
+
+    def _child_index(self, children: list[Any], target_ref: str) -> int:
+        for index, child in enumerate(children):
+            if isinstance(child, dict) and child.get("$ref") == target_ref:
+                return index
+        raise DocumentEditConflictError(f"Child ref not found in parent ordering: {target_ref}")
 
     def _edit_to_dict(self, edit: DocumentEdit) -> dict[str, Any]:
         return {

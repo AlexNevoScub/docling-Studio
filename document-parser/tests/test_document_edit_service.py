@@ -295,6 +295,68 @@ class TestDocumentEditService:
         assert second_ref == first_ref
         assert _tree_draft_ref_by_ref(first["tree"], "#/texts/12") == first_ref
 
+    async def test_move_item_after_reorders_siblings_in_preview_and_commit(
+        self, service, repos, doc, analysis
+    ):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/12")
+        after_target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/14")
+
+        session = await service.apply_commands(
+            doc.id,
+            session_id=initial_session["sessionId"],
+            draft_version=initial_session["draftVersion"],
+            commands=[
+                {
+                    "action": "move_item_after",
+                    "targetRef": target_ref,
+                    "payload": {"afterTargetRef": after_target_ref},
+                }
+            ],
+        )
+
+        root_refs = _root_tree_refs(session["tree"])
+        assert root_refs.index("#/texts/14") < root_refs.index("#/texts/12")
+        assert _tree_draft_ref_by_ref(session["tree"], "#/texts/12") == target_ref
+
+        commit_result = await service.commit(
+            doc.id,
+            session_id=session["sessionId"],
+            draft_version=session["draftVersion"],
+        )
+
+        assert commit_result["committed"] is True
+        assert _root_tree_refs(commit_result["tree"]).index("#/texts/14") < _root_tree_refs(
+            commit_result["tree"]
+        ).index("#/texts/12")
+
+        persisted = await repos["analyses"].find_latest_completed_by_document(doc.id)
+        assert persisted is not None
+        persisted_doc = json.loads(persisted.document_json or "{}")
+        body_order = _child_ref_order(persisted_doc["body"].get("children", []))
+        assert body_order.index("#/texts/14") < body_order.index("#/texts/12")
+
+    async def test_rejects_move_item_after_across_parents(self, service, doc, analysis):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/15")
+        after_target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/12")
+
+        with pytest.raises(DocumentEditConflictError) as exc:
+            await service.apply_commands(
+                doc.id,
+                session_id=initial_session["sessionId"],
+                draft_version=initial_session["draftVersion"],
+                commands=[
+                    {
+                        "action": "move_item_after",
+                        "targetRef": target_ref,
+                        "payload": {"afterTargetRef": after_target_ref},
+                    }
+                ],
+            )
+
+        assert "sibling reordering within one parent" in str(exc.value)
+
 
 def _element_by_ref(pages: list[dict], target_ref: str) -> dict:
     for page in pages:
@@ -333,3 +395,11 @@ def _tree_draft_ref_by_ref(nodes: list[dict], ref: str) -> str:
         if child_ref:
             return child_ref
     return ""
+
+
+def _root_tree_refs(nodes: list[dict]) -> list[str]:
+    return [str(node.get("ref") or "") for node in nodes]
+
+
+def _child_ref_order(children: list[dict]) -> list[str]:
+    return [str(child.get("$ref") or "") for child in children]

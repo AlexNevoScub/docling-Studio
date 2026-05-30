@@ -77,12 +77,13 @@ export interface Analysis {
 export interface DocumentEditCommand {
   id: string
   analysisId: string
-  action: 'update_page_element'
+  action: 'update_page_element' | 'move_item_after'
   targetRef: string
   payload: {
     content?: string
     bbox?: [number, number, number, number]
     type?: ElementType
+    afterTargetRef?: string
   }
   actor: string
   at: string
@@ -90,12 +91,13 @@ export interface DocumentEditCommand {
 }
 
 export interface DocumentEditCommandInput {
-  action: 'update_page_element'
+  action: 'update_page_element' | 'move_item_after'
   targetRef: string
   payload: {
     content?: string
     bbox?: [number, number, number, number]
     type?: ElementType
+    afterTargetRef?: string
   }
 }
 
