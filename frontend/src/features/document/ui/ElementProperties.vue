@@ -17,7 +17,7 @@
         <h3 class="props-section-title">{{ t('properties.identity') }}</h3>
         <dl class="props-list">
           <dt>{{ t('properties.id') }}</dt>
-          <dd class="mono">{{ element.self_ref || '—' }}</dd>
+          <dd class="mono">{{ element.draftRef || element.self_ref || '—' }}</dd>
           <dt>{{ t('properties.type') }}</dt>
           <dd>{{ element.type }}</dd>
           <dt>{{ t('properties.level') }}</dt>
@@ -83,7 +83,7 @@
             </button>
             <button
               class="props-btn props-btn--primary"
-              :disabled="documentSaving || !element.self_ref || !hasPageElementChanges"
+              :disabled="documentSaving || !pageElementTargetRef || !hasPageElementChanges"
               data-e2e="properties-save-page-element-btn"
               @click="savePageElement"
             >
@@ -220,6 +220,8 @@ const draftContent = ref('')
 const draftType = ref<ElementType>('text')
 const draftBbox = ref<[number, number, number, number]>([0, 0, 0, 0])
 
+const pageElementTargetRef = computed(() => props.element?.draftRef ?? props.element?.self_ref ?? null)
+
 const typeOptions: ElementType[] = [
   'text',
   'title',
@@ -282,10 +284,10 @@ const hasPageElementChanges = computed(() => {
 })
 
 function savePageElement(): void {
-  if (!props.element?.self_ref) return
+  if (!pageElementTargetRef.value) return
   const payload = currentPageElementPayload()
   if (Object.keys(payload).length === 0) return
-  emit('savePageElement', props.element.self_ref, payload)
+  emit('savePageElement', pageElementTargetRef.value, payload)
 }
 
 function currentPageElementPayload(): {
@@ -318,7 +320,7 @@ watch(
 // design call (#265 acceptance §11): drop the draft silently to keep
 // the interaction snappy; users can re-open Edit chunk if needed.
 watch(
-  () => props.element?.self_ref,
+  () => pageElementTargetRef.value,
   () => {
     if (editing.value) cancel()
     resetPageElementDraft()
@@ -329,7 +331,7 @@ watch(
 watch(
   [draftContent, draftType, draftBbox],
   () => {
-    if (!props.element?.self_ref) {
+    if (!pageElementTargetRef.value) {
       emit('clearPageElementPreview')
       return
     }
@@ -338,7 +340,7 @@ watch(
       emit('clearPageElementPreview')
       return
     }
-    emit('previewPageElement', props.element.self_ref, payload)
+    emit('previewPageElement', pageElementTargetRef.value, payload)
   },
   { deep: true },
 )

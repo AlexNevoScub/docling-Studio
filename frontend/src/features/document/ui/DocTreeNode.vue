@@ -3,8 +3,8 @@
     <button
       class="tree-node-row"
       :class="{
-        'tree-node-row--selected': selected === node.ref,
-        'tree-node-row--highlight': highlight === node.ref,
+        'tree-node-row--selected': selected === nodeRef,
+        'tree-node-row--highlight': highlight === nodeRef,
       }"
       @click="onRowClick"
     >
@@ -27,7 +27,7 @@
     <ul v-if="hasChildren && open" class="tree-list" role="group">
       <DocTreeNode
         v-for="child in node.children"
-        :key="child.ref"
+        :key="child.draftRef ?? child.ref"
         :node="child"
         :depth="depth + 1"
         :selected="selected"
@@ -65,9 +65,10 @@ const open = ref(props.defaultOpen ?? props.depth < 3)
 const hasChildren = computed(() => props.node.children.length > 0)
 
 const nodeColor = computed(() => colorFor(props.node.type))
+const nodeRef = computed(() => props.node.draftRef ?? props.node.ref)
 
 function onRowClick(): void {
-  emit('select', props.node.ref)
+  emit('select', nodeRef.value)
 }
 </script>
 

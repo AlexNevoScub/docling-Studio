@@ -13,7 +13,7 @@
     <ul v-else class="tree-list" role="tree">
       <TreeNode
         v-for="node in nodes"
-        :key="node.ref"
+        :key="node.draftRef ?? node.ref"
         :node="node"
         :selected="selected"
         :highlight="highlight"

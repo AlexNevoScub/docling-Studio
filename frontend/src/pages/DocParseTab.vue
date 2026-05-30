@@ -179,7 +179,7 @@ const displayedPages = computed(() => {
   return documentStore.workspacePages.map((page) => ({
     ...page,
     elements: page.elements.map((element) =>
-      element.self_ref === preview.targetRef
+      elementDraftRef(element) === preview.targetRef
         ? {
             ...element,
             content: preview.payload.content ?? element.content,
@@ -206,7 +206,7 @@ const selectedElement = computed<PageElement | null>(() => {
   // triggers a page change, but until that lands the panel still wants
   // to show the element's data).
   for (const page of documentStore.workspacePages) {
-    const el = page.elements.find((e) => e.self_ref === selectedNodeRef.value)
+    const el = page.elements.find((e) => elementDraftRef(e) === selectedNodeRef.value)
     if (el) return el
   }
   return null
@@ -266,7 +266,8 @@ function onHoverElement(_el: PageElement | null): void {
 }
 
 function onClickElement(el: PageElement): void {
-  if (el.self_ref) selectedNodeRef.value = el.self_ref
+  const ref = elementDraftRef(el)
+  if (ref) selectedNodeRef.value = ref
 }
 
 async function onSaveChunk(chunkId: string, text: string): Promise<void> {
@@ -354,13 +355,17 @@ function filterTree(nodes: readonly DocTreeNode[], needle: string): DocTreeNode[
 }
 
 function findPageOfRef(
-  pages: readonly { page_number: number; elements: readonly { self_ref?: string }[] }[],
+  pages: readonly { page_number: number; elements: readonly PageElement[] }[],
   ref: string,
 ): number | null {
   for (const page of pages) {
-    if (page.elements.some((e) => e.self_ref === ref)) return page.page_number
+    if (page.elements.some((e) => elementDraftRef(e) === ref)) return page.page_number
   }
   return null
+}
+
+function elementDraftRef(element: Pick<PageElement, 'draftRef' | 'self_ref'>): string | null {
+  return element.draftRef ?? element.self_ref ?? null
 }
 </script>
 

@@ -164,7 +164,10 @@ function centerHighlighted(): void {
   const frame = frameRef.value
   if (!refs || refs.size === 0 || !page || !img || !stage || !frame) return
 
-  const target = page.elements.find((e) => !!e.self_ref && refs.has(e.self_ref))
+  const target = page.elements.find((e) => {
+    const ref = e.draftRef ?? e.self_ref
+    return !!ref && refs.has(ref)
+  })
   if (!target) return
 
   const scale = computeScale(img.clientWidth, img.clientHeight, page.width, page.height)

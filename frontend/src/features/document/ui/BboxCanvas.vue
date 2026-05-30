@@ -83,7 +83,8 @@ function draw(): void {
     const rect = bboxToRect(el.bbox, scale)
     if (rect.w <= 0 || rect.h <= 0) continue
     const color = colorFor(el.type)
-    const isHighlight = !!el.self_ref && highlighted.has(el.self_ref)
+    const highlightRef = el.draftRef ?? el.self_ref
+    const isHighlight = !!highlightRef && highlighted.has(highlightRef)
     if (isHighlight) continue // drawn in the second pass
 
     // Dim everything else when a focus target is set, so the highlight pops.
@@ -103,10 +104,11 @@ function draw(): void {
   }
 
   // Second pass — focused element, drawn on top with a bold stroke and a
-  // dashed halo so it pops over the dimmed neighbours.
+    // dashed halo so it pops over the dimmed neighbours.
   if (focusMode) {
     for (const el of visibleElements()) {
-      if (!el.self_ref || !highlighted.has(el.self_ref)) continue
+      const highlightRef = el.draftRef ?? el.self_ref
+      if (!highlightRef || !highlighted.has(highlightRef)) continue
       const rect = bboxToRect(el.bbox, scale)
       if (rect.w <= 0 || rect.h <= 0) continue
       const color = colorFor(el.type)
