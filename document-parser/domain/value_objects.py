@@ -82,6 +82,7 @@ class DocumentEditAction(StrEnum):
     UPDATE_PAGE_ELEMENT = "update_page_element"
     MOVE_ITEM_BEFORE = "move_item_before"
     MOVE_ITEM_AFTER = "move_item_after"
+    REPARENT_ITEM = "reparent_item"
 
 
 class DocumentEditStatus(StrEnum):

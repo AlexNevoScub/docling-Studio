@@ -77,7 +77,7 @@ export interface Analysis {
 export interface DocumentEditCommand {
   id: string
   analysisId: string
-  action: 'update_page_element' | 'move_item_before' | 'move_item_after'
+  action: 'update_page_element' | 'move_item_before' | 'move_item_after' | 'reparent_item'
   targetRef: string
   payload: {
     content?: string
@@ -85,6 +85,8 @@ export interface DocumentEditCommand {
     type?: ElementType
     beforeTargetRef?: string
     afterTargetRef?: string
+    parentTargetRef?: string
+    index?: number
   }
   actor: string
   at: string
@@ -92,7 +94,7 @@ export interface DocumentEditCommand {
 }
 
 export interface DocumentEditCommandInput {
-  action: 'update_page_element' | 'move_item_before' | 'move_item_after'
+  action: 'update_page_element' | 'move_item_before' | 'move_item_after' | 'reparent_item'
   targetRef: string
   payload: {
     content?: string
@@ -100,6 +102,8 @@ export interface DocumentEditCommandInput {
     type?: ElementType
     beforeTargetRef?: string
     afterTargetRef?: string
+    parentTargetRef?: string
+    index?: number
   }
 }
 

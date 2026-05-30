@@ -418,6 +418,67 @@ class TestDocumentEditService:
 
         assert "targetRef cannot equal beforeTargetRef" in str(exc.value)
 
+    async def test_reparent_item_moves_child_under_new_parent_and_commits(
+        self, service, repos, doc, analysis
+    ):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/12")
+        parent_target_ref = _tree_draft_ref_by_ref(initial_session["tree"], "#/groups/0")
+
+        session = await service.apply_commands(
+            doc.id,
+            session_id=initial_session["sessionId"],
+            draft_version=initial_session["draftVersion"],
+            commands=[
+                {
+                    "action": "reparent_item",
+                    "targetRef": target_ref,
+                    "payload": {"parentTargetRef": parent_target_ref, "index": 0},
+                }
+            ],
+        )
+
+        assert _tree_child_refs(session["tree"], "#/groups/0")[:1] == ["#/texts/12"]
+        assert _tree_draft_ref_by_ref(session["tree"], "#/texts/12") == target_ref
+
+        commit_result = await service.commit(
+            doc.id,
+            session_id=session["sessionId"],
+            draft_version=session["draftVersion"],
+        )
+
+        assert commit_result["committed"] is True
+        assert _tree_child_refs(commit_result["tree"], "#/groups/0")[:1] == ["#/texts/12"]
+
+        persisted = await repos["analyses"].find_latest_completed_by_document(doc.id)
+        assert persisted is not None
+        persisted_doc = json.loads(persisted.document_json or "{}")
+        group = _node_by_self_ref(persisted_doc.get("groups", []), "#/groups/0")
+        text = _node_by_self_ref(persisted_doc.get("texts", []), "#/texts/12")
+        assert _child_ref_order(group.get("children", []))[:1] == ["#/texts/12"]
+        assert text.get("parent", {}).get("$ref") == "#/groups/0"
+
+    async def test_rejects_reparent_item_into_descendant(self, service, doc, analysis):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _tree_draft_ref_by_ref(initial_session["tree"], "#/groups/0")
+        parent_target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/15")
+
+        with pytest.raises(DocumentEditConflictError) as exc:
+            await service.apply_commands(
+                doc.id,
+                session_id=initial_session["sessionId"],
+                draft_version=initial_session["draftVersion"],
+                commands=[
+                    {
+                        "action": "reparent_item",
+                        "targetRef": target_ref,
+                        "payload": {"parentTargetRef": parent_target_ref},
+                    }
+                ],
+            )
+
+        assert "cannot move a node under one of its descendants" in str(exc.value)
+
 
 def _element_by_ref(pages: list[dict], target_ref: str) -> dict:
     for page in pages:
@@ -464,3 +525,20 @@ def _root_tree_refs(nodes: list[dict]) -> list[str]:
 
 def _child_ref_order(children: list[dict]) -> list[str]:
     return [str(child.get("$ref") or "") for child in children]
+
+
+def _tree_child_refs(nodes: list[dict], ref: str) -> list[str]:
+    for node in nodes:
+        if node.get("ref") == ref:
+            return [str(child.get("ref") or "") for child in node.get("children", [])]
+        child_refs = _tree_child_refs(node.get("children", []), ref)
+        if child_refs:
+            return child_refs
+    return []
+
+
+def _node_by_self_ref(nodes: list[dict], ref: str) -> dict:
+    for node in nodes:
+        if node.get("self_ref") == ref:
+            return node
+    raise AssertionError(f"Node not found: {ref}")

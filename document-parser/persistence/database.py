@@ -179,7 +179,7 @@ CREATE TABLE IF NOT EXISTS document_edits (
     document_id   TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     analysis_id   TEXT NOT NULL REFERENCES analysis_jobs(id) ON DELETE CASCADE,
     action        TEXT NOT NULL
-                  CHECK (action IN ('update_page_element', 'move_item_before', 'move_item_after')),
+                  CHECK (action IN ('update_page_element', 'move_item_before', 'move_item_after', 'reparent_item')),
     target_ref    TEXT NOT NULL,
     payload_json  TEXT NOT NULL,
     actor         TEXT NOT NULL DEFAULT 'system',

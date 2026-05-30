@@ -282,6 +282,9 @@ class DocumentEditService:
             if edit.action is DocumentEditAction.MOVE_ITEM_AFTER:
                 document = self._apply_move_item_after(document, edit, bindings)
                 continue
+            if edit.action is DocumentEditAction.REPARENT_ITEM:
+                document = self._apply_reparent_item(document, edit, bindings)
+                continue
             raise DocumentEditConflictError(
                 f"Unsupported document edit action: {edit.action.value}"
             )
@@ -377,6 +380,23 @@ class DocumentEditService:
                 )
             return
 
+        if action is DocumentEditAction.REPARENT_ITEM:
+            allowed = {"parentTargetRef", "index"}
+            unknown = sorted(set(payload) - allowed)
+            if unknown:
+                raise DocumentEditConflictError(
+                    f"Unsupported reparent_item payload fields: {', '.join(unknown)}"
+                )
+            parent_target_ref = payload.get("parentTargetRef")
+            if not isinstance(parent_target_ref, str) or not parent_target_ref:
+                raise DocumentEditConflictError("reparent_item payload.parentTargetRef is required")
+            index = payload.get("index")
+            if index is not None and (not isinstance(index, int) or index < 0):
+                raise DocumentEditConflictError(
+                    "reparent_item payload.index must be a non-negative integer"
+                )
+            return
+
         raise DocumentEditConflictError(f"Unsupported document edit action: {action.value}")
 
     def _apply_update_page_element(
@@ -426,6 +446,22 @@ class DocumentEditService:
                 "move_item_before targetRef cannot equal beforeTargetRef"
             )
         return self._reorder_item_before(document, target_ref, before_target_ref)
+
+    def _apply_reparent_item(
+        self,
+        document: DoclingDocument,
+        edit: DocumentEdit,
+        bindings: dict[str, DraftNodeBinding],
+    ) -> DoclingDocument:
+        target_ref = self._resolve_self_ref(edit.target_ref, bindings)
+        parent_target_ref = self._resolve_self_ref(
+            str(edit.payload.get("parentTargetRef") or ""),
+            bindings,
+        )
+        if target_ref == parent_target_ref:
+            raise DocumentEditConflictError("reparent_item targetRef cannot equal parentTargetRef")
+        index = edit.payload.get("index")
+        return self._reparent_item(document, target_ref, parent_target_ref, index=index)
 
     def _apply_content(self, item: DocItem, target_ref: str, content: Any) -> None:
         if not hasattr(item, "text"):
@@ -659,6 +695,61 @@ class DocumentEditService:
         children.insert(insert_index, target_child)
         return DoclingDocument.model_validate(document_dict)
 
+    def _reparent_item(
+        self,
+        document: DoclingDocument,
+        target_ref: str,
+        parent_target_ref: str,
+        *,
+        index: Any,
+    ) -> DoclingDocument:
+        document_dict = document.export_to_dict()
+        nodes_by_ref = self._index_document_nodes(document_dict)
+        target_node = nodes_by_ref.get(target_ref)
+        parent_node = nodes_by_ref.get(parent_target_ref)
+        if target_node is None:
+            raise DocumentEditNotFoundError(f"Document item not found: {target_ref}")
+        if parent_node is None:
+            raise DocumentEditNotFoundError(f"Document item not found: {parent_target_ref}")
+        if self._is_descendant_ref(nodes_by_ref, parent_target_ref, target_ref):
+            raise DocumentEditConflictError(
+                "reparent_item cannot move a node under one of its descendants"
+            )
+
+        current_parent_ref = self._parent_ref(target_node)
+        if not current_parent_ref:
+            raise DocumentEditConflictError(f"Target node is missing a parent: {target_ref}")
+        current_parent_node = nodes_by_ref.get(current_parent_ref)
+        if current_parent_node is None:
+            raise DocumentEditConflictError(
+                f"Parent node not found for reparent: {current_parent_ref}"
+            )
+
+        current_children = current_parent_node.get("children")
+        next_children = parent_node.get("children")
+        if not isinstance(current_children, list):
+            raise DocumentEditConflictError(
+                f"Parent does not expose reparentable children: {current_parent_ref}"
+            )
+        if not isinstance(next_children, list):
+            raise DocumentEditConflictError(
+                f"Target parent does not expose children: {parent_target_ref}"
+            )
+
+        current_index = self._child_index(current_children, target_ref)
+        target_child = current_children.pop(current_index)
+        if (
+            current_parent_ref == parent_target_ref
+            and isinstance(index, int)
+            and current_index < index
+        ):
+            index -= 1
+
+        insert_index = len(next_children) if index is None else min(index, len(next_children))
+        next_children.insert(insert_index, target_child)
+        target_node["parent"] = {"$ref": parent_target_ref}
+        return DoclingDocument.model_validate(document_dict)
+
     def _index_document_nodes(self, value: Any) -> dict[str, dict[str, Any]]:
         nodes: dict[str, dict[str, Any]] = {}
 
@@ -690,6 +781,22 @@ class DocumentEditService:
             if isinstance(child, dict) and child.get("$ref") == target_ref:
                 return index
         raise DocumentEditConflictError(f"Child ref not found in parent ordering: {target_ref}")
+
+    def _is_descendant_ref(
+        self,
+        nodes_by_ref: dict[str, dict[str, Any]],
+        ancestor_ref: str,
+        target_ref: str,
+    ) -> bool:
+        current_ref = ancestor_ref
+        while current_ref:
+            if current_ref == target_ref:
+                return True
+            current_node = nodes_by_ref.get(current_ref)
+            if current_node is None:
+                return False
+            current_ref = self._parent_ref(current_node)
+        return False
 
     def _edit_to_dict(self, edit: DocumentEdit) -> dict[str, Any]:
         return {
