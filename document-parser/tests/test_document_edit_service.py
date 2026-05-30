@@ -11,6 +11,7 @@ import pytest
 from domain.models import AnalysisJob, AnalysisStatus, Document
 from persistence.analysis_repo import SqliteAnalysisRepository
 from persistence.database import init_db
+from persistence.draft_node_binding_repo import SqliteDraftNodeBindingRepository
 from persistence.document_edit_repo import SqliteDocumentEditRepository
 from persistence.document_edit_session_repo import SqliteDocumentEditSessionRepository
 from persistence.document_repo import SqliteDocumentRepository
@@ -60,6 +61,7 @@ def repos():
         "analyses": SqliteAnalysisRepository(),
         "edits": SqliteDocumentEditRepository(),
         "sessions": SqliteDocumentEditSessionRepository(),
+        "bindings": SqliteDraftNodeBindingRepository(),
     }
 
 
@@ -83,6 +85,7 @@ def service(repos) -> DocumentEditService:
         analysis_repo=repos["analyses"],
         edit_repo=repos["edits"],
         session_repo=repos["sessions"],
+        binding_repo=repos["bindings"],
     )
 
 
@@ -90,14 +93,16 @@ class TestDocumentEditService:
     async def test_update_content_preview_and_commit(self, service, repos, doc, analysis):
         updated_content = "Updated correspondence block"
 
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/12")
         session = await service.apply_commands(
             doc.id,
-            session_id=(await service.get_session(doc.id))["sessionId"],
+            session_id=initial_session["sessionId"],
             draft_version=0,
             commands=[
                 {
                     "action": "update_page_element",
-                    "targetRef": "#/texts/12",
+                    "targetRef": target_ref,
                     "payload": {"content": updated_content},
                 }
             ],
@@ -132,14 +137,16 @@ class TestDocumentEditService:
     async def test_update_bbox_preview_and_commit(self, service, repos, doc, analysis):
         updated_bbox = [120.5, 630.25, 340.75, 655.5]
 
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/12")
         session = await service.apply_commands(
             doc.id,
-            session_id=(await service.get_session(doc.id))["sessionId"],
+            session_id=initial_session["sessionId"],
             draft_version=0,
             commands=[
                 {
                     "action": "update_page_element",
-                    "targetRef": "#/texts/12",
+                    "targetRef": target_ref,
                     "payload": {"bbox": updated_bbox},
                 }
             ],
@@ -160,14 +167,16 @@ class TestDocumentEditService:
         assert persisted_element["bbox"] == pytest.approx(updated_bbox)
 
     async def test_allows_safe_type_change_within_text_family(self, service, doc, analysis):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/12")
         session = await service.apply_commands(
             doc.id,
-            session_id=(await service.get_session(doc.id))["sessionId"],
+            session_id=initial_session["sessionId"],
             draft_version=0,
             commands=[
                 {
                     "action": "update_page_element",
-                    "targetRef": "#/texts/12",
+                    "targetRef": target_ref,
                     "payload": {"type": "section_header"},
                 }
             ],
@@ -192,14 +201,16 @@ class TestDocumentEditService:
     async def test_replaces_committed_text_item_shape_for_title_transition(
         self, service, doc, analysis
     ):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/12")
         session = await service.apply_commands(
             doc.id,
-            session_id=(await service.get_session(doc.id))["sessionId"],
+            session_id=initial_session["sessionId"],
             draft_version=0,
             commands=[
                 {
                     "action": "update_page_element",
-                    "targetRef": "#/texts/12",
+                    "targetRef": target_ref,
                     "payload": {"type": "title"},
                 }
             ],
@@ -222,15 +233,17 @@ class TestDocumentEditService:
         assert "level" not in text_item
 
     async def test_rejects_cross_family_type_change_from_table(self, service, doc, analysis):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/tables/0")
         with pytest.raises(DocumentEditConflictError) as exc:
             await service.apply_commands(
                 doc.id,
-                session_id=(await service.get_session(doc.id))["sessionId"],
+                session_id=initial_session["sessionId"],
                 draft_version=0,
                 commands=[
                     {
                         "action": "update_page_element",
-                        "targetRef": "#/tables/0",
+                        "targetRef": target_ref,
                         "payload": {"type": "section_header"},
                     }
                 ],
@@ -240,6 +253,7 @@ class TestDocumentEditService:
 
     async def test_rejects_stale_draft_version(self, service, doc, analysis):
         session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(session["pages"], "#/texts/12")
 
         await service.apply_commands(
             doc.id,
@@ -248,7 +262,7 @@ class TestDocumentEditService:
             commands=[
                 {
                     "action": "update_page_element",
-                    "targetRef": "#/texts/12",
+                    "targetRef": target_ref,
                     "payload": {"content": "First update"},
                 }
             ],
@@ -262,13 +276,24 @@ class TestDocumentEditService:
                 commands=[
                     {
                         "action": "update_page_element",
-                        "targetRef": "#/texts/12",
+                        "targetRef": target_ref,
                         "payload": {"content": "Second update"},
                     }
                 ],
             )
 
         assert "Draft version mismatch" in str(exc.value)
+
+    async def test_session_exposes_stable_draft_refs(self, service, doc, analysis):
+        first = await service.get_session(doc.id)
+        second = await service.get_session(doc.id)
+
+        first_ref = _draft_ref_by_self_ref(first["pages"], "#/texts/12")
+        second_ref = _draft_ref_by_self_ref(second["pages"], "#/texts/12")
+
+        assert first_ref.startswith("draft-")
+        assert second_ref == first_ref
+        assert _tree_draft_ref_by_ref(first["tree"], "#/texts/12") == first_ref
 
 
 def _element_by_ref(pages: list[dict], target_ref: str) -> dict:
@@ -284,3 +309,27 @@ def _text_item_by_ref(document_json: dict, target_ref: str) -> dict:
         if item.get("self_ref") == target_ref:
             return item
     raise AssertionError(f"Text item not found in document_json: {target_ref}")
+
+
+def _draft_ref_by_self_ref(pages: list[dict], self_ref: str) -> str:
+    for page in pages:
+        for element in page.get("elements", []):
+            if element.get("self_ref") == self_ref:
+                draft_ref = element.get("draftRef")
+                if isinstance(draft_ref, str) and draft_ref:
+                    return draft_ref
+                raise AssertionError(f"draftRef missing for {self_ref}")
+    raise AssertionError(f"Element not found in pages: {self_ref}")
+
+
+def _tree_draft_ref_by_ref(nodes: list[dict], ref: str) -> str:
+    for node in nodes:
+        if node.get("ref") == ref:
+            draft_ref = node.get("draftRef")
+            if isinstance(draft_ref, str) and draft_ref:
+                return draft_ref
+            raise AssertionError(f"draftRef missing for tree ref {ref}")
+        child_ref = _tree_draft_ref_by_ref(node.get("children", []), ref)
+        if child_ref:
+            return child_ref
+    return ""

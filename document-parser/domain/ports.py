@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         Chunk,
         ChunkEdit,
         ChunkPush,
+        DraftNodeBinding,
         DocumentEdit,
         DocumentEditSession,
         Document,
@@ -211,6 +212,16 @@ class DocumentEditSessionRepository(Protocol):
     async def update(self, session: DocumentEditSession) -> None: ...
 
     async def delete(self, session_id: str) -> bool: ...
+
+
+class DraftNodeBindingRepository(Protocol):
+    """Port for stable draft-ref bindings within one active session."""
+
+    async def find_by_session(self, session_id: str) -> list[DraftNodeBinding]: ...
+
+    async def replace_for_session(
+        self, session_id: str, bindings: list[DraftNodeBinding]
+    ) -> None: ...
 
 
 class AnalysisRepository(Protocol):

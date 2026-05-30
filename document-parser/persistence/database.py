@@ -204,6 +204,17 @@ CREATE TABLE IF NOT EXISTS document_edit_sessions (
 CREATE INDEX IF NOT EXISTS idx_document_edit_sessions_doc
     ON document_edit_sessions(document_id);
 
+-- Stable session-local draft refs mapped to current Docling refs.
+CREATE TABLE IF NOT EXISTS document_edit_draft_bindings (
+    session_id   TEXT NOT NULL REFERENCES document_edit_sessions(id) ON DELETE CASCADE,
+    draft_ref    TEXT NOT NULL,
+    self_ref     TEXT,
+    node_kind    TEXT NOT NULL DEFAULT 'node',
+    PRIMARY KEY (session_id, draft_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_document_edit_draft_bindings_session_self
+    ON document_edit_draft_bindings(session_id, self_ref);
+
 -- Immutable push audit. Compound index covers the "last push for (doc,
 -- store)" lookup that drives the diff endpoint and the link upsert.
 CREATE TABLE IF NOT EXISTS chunk_pushes (

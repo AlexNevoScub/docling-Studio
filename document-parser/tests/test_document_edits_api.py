@@ -38,11 +38,34 @@ def _pending_command() -> dict:
 
 
 def _tree(label: str = "Draft title") -> list[dict]:
-    return [{"ref": "#/texts/12", "type": "title", "label": label, "children": []}]
+    return [
+        {
+            "ref": "#/texts/12",
+            "draftRef": "draft-1",
+            "type": "title",
+            "label": label,
+            "children": [],
+        }
+    ]
 
 
 def _pages() -> list[dict]:
-    return [{"page_number": 1, "width": 600, "height": 800, "elements": []}]
+    return [
+        {
+            "page_number": 1,
+            "width": 600,
+            "height": 800,
+            "elements": [
+                {
+                    "self_ref": "#/texts/12",
+                    "draftRef": "draft-1",
+                    "type": "title",
+                    "content": "Draft title",
+                    "bbox": [0, 0, 10, 10],
+                }
+            ],
+        }
+    ]
 
 
 class TestDocumentEditSessionRoutes:

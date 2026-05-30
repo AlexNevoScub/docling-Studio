@@ -327,6 +327,16 @@ class DocumentEditSession:
     updated_at: datetime
 
 
+@dataclass
+class DraftNodeBinding:
+    """Stable session-local identity mapped to the current Docling ref."""
+
+    session_id: str
+    draft_ref: str
+    self_ref: str | None
+    node_kind: str
+
+
 class DocumentVersionKind(enum.StrEnum):
     """What triggered the version snapshot.
 

@@ -407,9 +407,13 @@ function updatePageElementLocally(
   return pages.map((page) => ({
     ...page,
     elements: page.elements.map((element) =>
-      element.self_ref === targetRef ? applyElementPayload(element, payload) : element,
+      elementTargetRef(element) === targetRef ? applyElementPayload(element, payload) : element,
     ),
   }))
+}
+
+function elementTargetRef(element: Pick<PageElement, 'draftRef' | 'self_ref'>): string | null {
+  return element.draftRef ?? element.self_ref ?? null
 }
 
 function applyElementPayload(
