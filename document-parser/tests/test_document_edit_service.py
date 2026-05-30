@@ -372,6 +372,76 @@ class TestDocumentEditService:
 
         assert "requires adjacent siblings with targetRef leading" in str(exc.value)
 
+    async def test_split_item_creates_following_text_sibling_and_commits(
+        self, service, repos, doc, analysis
+    ):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/11")
+        original_content = _element_by_ref(initial_session["pages"], "#/texts/11")["content"]
+        split_index = 2
+        leading_content = original_content[:split_index]
+        trailing_content = original_content[split_index:]
+
+        session = await service.apply_commands(
+            doc.id,
+            session_id=initial_session["sessionId"],
+            draft_version=initial_session["draftVersion"],
+            commands=[
+                {
+                    "action": "split_item",
+                    "targetRef": target_ref,
+                    "payload": {"splitIndex": split_index},
+                }
+            ],
+        )
+
+        new_ref = _next_tree_ref_after(session["tree"], "#/texts/11")
+        assert new_ref.startswith("#/texts/")
+        assert _element_by_ref(session["pages"], "#/texts/11")["content"] == leading_content
+        assert _element_by_ref(session["pages"], new_ref)["content"] == trailing_content
+        assert _root_tree_refs(session["tree"]).index(new_ref) == (
+            _root_tree_refs(session["tree"]).index("#/texts/11") + 1
+        )
+
+        commit_result = await service.commit(
+            doc.id,
+            session_id=session["sessionId"],
+            draft_version=session["draftVersion"],
+        )
+
+        assert commit_result["committed"] is True
+        assert _element_by_ref(commit_result["pages"], "#/texts/11")["content"] == leading_content
+        assert _element_by_ref(commit_result["pages"], new_ref)["content"] == trailing_content
+
+        persisted = await repos["analyses"].find_latest_completed_by_document(doc.id)
+        assert persisted is not None
+        persisted_doc = json.loads(persisted.document_json or "{}")
+        assert _text_item_by_ref(persisted_doc, "#/texts/11")["text"] == leading_content
+        assert _text_item_by_ref(persisted_doc, new_ref)["text"] == trailing_content
+        body_children = _child_ref_order(persisted_doc["body"].get("children", []))
+        assert body_children.index(new_ref) == body_children.index("#/texts/11") + 1
+
+    async def test_rejects_split_item_at_text_end(self, service, doc, analysis):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/11")
+        original_content = _element_by_ref(initial_session["pages"], "#/texts/11")["content"]
+
+        with pytest.raises(DocumentEditConflictError) as exc:
+            await service.apply_commands(
+                doc.id,
+                session_id=initial_session["sessionId"],
+                draft_version=initial_session["draftVersion"],
+                commands=[
+                    {
+                        "action": "split_item",
+                        "targetRef": target_ref,
+                        "payload": {"splitIndex": len(original_content)},
+                    }
+                ],
+            )
+
+        assert "must be smaller than the text length" in str(exc.value)
+
     async def test_move_item_after_reorders_siblings_in_preview_and_commit(
         self, service, repos, doc, analysis
     ):
@@ -620,6 +690,12 @@ def _tree_child_refs(nodes: list[dict], ref: str) -> list[str]:
         if child_refs:
             return child_refs
     return []
+
+
+def _next_tree_ref_after(nodes: list[dict], ref: str) -> str:
+    root_refs = _root_tree_refs(nodes)
+    index = root_refs.index(ref)
+    return root_refs[index + 1]
 
 
 def _node_by_self_ref(nodes: list[dict], ref: str) -> dict:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+import copy
 from dataclasses import asdict
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -279,6 +280,9 @@ class DocumentEditService:
             if edit.action is DocumentEditAction.MERGE_ITEMS:
                 document = self._apply_merge_items(document, edit, bindings)
                 continue
+            if edit.action is DocumentEditAction.SPLIT_ITEM:
+                document = self._apply_split_item(document, edit, bindings)
+                continue
             if edit.action is DocumentEditAction.MOVE_ITEM_BEFORE:
                 document = self._apply_move_item_before(document, edit, bindings)
                 continue
@@ -384,6 +388,20 @@ class DocumentEditService:
                 raise DocumentEditConflictError("merge_items payload.separator must be a string")
             return
 
+        if action is DocumentEditAction.SPLIT_ITEM:
+            allowed = {"splitIndex"}
+            unknown = sorted(set(payload) - allowed)
+            if unknown:
+                raise DocumentEditConflictError(
+                    f"Unsupported split_item payload fields: {', '.join(unknown)}"
+                )
+            split_index = payload.get("splitIndex")
+            if not isinstance(split_index, int) or split_index < 1:
+                raise DocumentEditConflictError(
+                    "split_item payload.splitIndex must be a positive integer"
+                )
+            return
+
         if action is DocumentEditAction.MOVE_ITEM_BEFORE:
             allowed = {"beforeTargetRef"}
             unknown = sorted(set(payload) - allowed)
@@ -463,6 +481,16 @@ class DocumentEditService:
             raise DocumentEditConflictError("merge_items targetRef cannot equal trailingTargetRef")
         separator = str(edit.payload.get("separator") or "")
         return self._merge_items(document, target_ref, trailing_target_ref, separator=separator)
+
+    def _apply_split_item(
+        self,
+        document: DoclingDocument,
+        edit: DocumentEdit,
+        bindings: dict[str, DraftNodeBinding],
+    ) -> DoclingDocument:
+        target_ref = self._resolve_self_ref(edit.target_ref, bindings)
+        split_index = int(edit.payload.get("splitIndex") or 0)
+        return self._split_item(document, target_ref, split_index=split_index)
 
     def _apply_move_item_before(
         self,
@@ -746,6 +774,63 @@ class DocumentEditService:
             action_name="move_item_before",
         )
 
+    def _split_item(
+        self,
+        document: DoclingDocument,
+        target_ref: str,
+        *,
+        split_index: int,
+    ) -> DoclingDocument:
+        target_item = self._find_item(document, target_ref)
+        if not isinstance(target_item, TextItem):
+            raise DocumentEditConflictError("split_item currently supports text items only")
+
+        document_dict = document.export_to_dict()
+        nodes_by_ref = self._index_document_nodes(document_dict)
+        target_node = nodes_by_ref.get(target_ref)
+        if target_node is None:
+            raise DocumentEditNotFoundError(f"Document item not found: {target_ref}")
+
+        target_text = str(target_node.get("text") or "")
+        if split_index >= len(target_text):
+            raise DocumentEditConflictError(
+                "split_item payload.splitIndex must be smaller than the text length"
+            )
+
+        parent_ref = self._parent_ref(target_node)
+        if not parent_ref:
+            raise DocumentEditConflictError(f"Target node is missing a parent: {target_ref}")
+        parent_node = nodes_by_ref.get(parent_ref)
+        if parent_node is None:
+            raise DocumentEditConflictError(f"Parent node not found for split: {parent_ref}")
+        children = parent_node.get("children")
+        if not isinstance(children, list):
+            raise DocumentEditConflictError(
+                f"Parent does not expose splittable children: {parent_ref}"
+            )
+
+        child_index = self._child_index(children, target_ref)
+        leading_text = target_text[:split_index]
+        trailing_text = target_text[split_index:]
+        next_self_ref = self._next_text_self_ref(document_dict)
+
+        target_node["text"] = leading_text
+        if "orig" in target_node:
+            target_node["orig"] = leading_text
+
+        split_node = copy.deepcopy(target_node)
+        split_node["self_ref"] = next_self_ref
+        split_node["text"] = trailing_text
+        if "orig" in split_node:
+            split_node["orig"] = trailing_text
+
+        texts = document_dict.get("texts")
+        if not isinstance(texts, list):
+            raise DocumentEditConflictError("Document does not expose a texts array")
+        texts.append(split_node)
+        children.insert(child_index + 1, {"$ref": next_self_ref})
+        return DoclingDocument.model_validate(document_dict)
+
     def _reorder_item_relative(
         self,
         document: DoclingDocument,
@@ -859,6 +944,23 @@ class DocumentEditService:
                 texts.pop(index)
                 return
         raise DocumentEditNotFoundError(f"Document item not found: {target_ref}")
+
+    def _next_text_self_ref(self, document_dict: dict[str, Any]) -> str:
+        texts = document_dict.get("texts")
+        if not isinstance(texts, list):
+            raise DocumentEditConflictError("Document does not expose a texts array")
+        next_index = -1
+        for item in texts:
+            if not isinstance(item, dict):
+                continue
+            self_ref = item.get("self_ref")
+            if not isinstance(self_ref, str) or not self_ref.startswith("#/texts/"):
+                continue
+            try:
+                next_index = max(next_index, int(self_ref.removeprefix("#/texts/")))
+            except ValueError:
+                continue
+        return f"#/texts/{next_index + 1}"
 
     def _index_document_nodes(self, value: Any) -> dict[str, dict[str, Any]]:
         nodes: dict[str, dict[str, Any]] = {}

@@ -77,7 +77,7 @@ export interface Analysis {
 export interface DocumentEditCommand {
   id: string
   analysisId: string
-  action: 'update_page_element' | 'merge_items' | 'move_item_before' | 'move_item_after' | 'reparent_item'
+  action: 'update_page_element' | 'merge_items' | 'split_item' | 'move_item_before' | 'move_item_after' | 'reparent_item'
   targetRef: string
   payload: {
     content?: string
@@ -85,6 +85,7 @@ export interface DocumentEditCommand {
     type?: ElementType
     trailingTargetRef?: string
     separator?: string
+    splitIndex?: number
     beforeTargetRef?: string
     afterTargetRef?: string
     parentTargetRef?: string
@@ -96,7 +97,7 @@ export interface DocumentEditCommand {
 }
 
 export interface DocumentEditCommandInput {
-  action: 'update_page_element' | 'merge_items' | 'move_item_before' | 'move_item_after' | 'reparent_item'
+  action: 'update_page_element' | 'merge_items' | 'split_item' | 'move_item_before' | 'move_item_after' | 'reparent_item'
   targetRef: string
   payload: {
     content?: string
@@ -104,6 +105,7 @@ export interface DocumentEditCommandInput {
     type?: ElementType
     trailingTargetRef?: string
     separator?: string
+    splitIndex?: number
     beforeTargetRef?: string
     afterTargetRef?: string
     parentTargetRef?: string
