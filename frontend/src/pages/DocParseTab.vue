@@ -98,6 +98,8 @@
         :document-saving="documentStore.documentEditSaving"
         :document-committing="documentStore.documentEditCommitting"
         :has-pending-document-edits="documentStore.pendingDocumentCommands.length > 0"
+        :previous-sibling-target-ref="selectedSiblingRefs.previousSiblingRef"
+        :next-sibling-target-ref="selectedSiblingRefs.nextSiblingRef"
         :saving="chunksStore.saving"
         @preview-page-element="onPreviewPageElement"
         @clear-page-element-preview="clearPageElementPreview"
@@ -129,6 +131,7 @@ import { useAnalysisStore } from '../features/analysis/store'
 import { useChunksStore } from '../features/chunks/store'
 import { fetchDocumentTree } from '../features/document/api'
 import { reconcileSelectedDraftRef, resolveSelectedSelfRef } from '../features/document/editSelection'
+import { adjacentSiblingRefs } from '../features/document/siblingTargets'
 import { useDocumentStore } from '../features/document/store'
 import { chunkForElement } from '../features/document/linkedView'
 import DocTreeRail from '../features/document/ui/DocTreeRail.vue'
@@ -221,6 +224,7 @@ const linkedChunk = computed<DocChunk | null>(() => {
 })
 
 const nodeCount = computed(() => countNodes(effectiveTree.value))
+const selectedSiblingRefs = computed(() => adjacentSiblingRefs(effectiveTree.value, selectedNodeRef.value))
 
 const filteredNodes = computed<DocTreeNode[]>(() => {
   const needle = filter.value.trim().toLowerCase()

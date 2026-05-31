@@ -138,6 +138,30 @@
               {{ documentSaving ? t('properties.saving') : t('properties.splitItem') }}
             </button>
             <button
+              class="props-btn"
+              :disabled="documentSaving || !previousSiblingTargetRef"
+              data-e2e="properties-move-before-btn"
+              @click="moveBefore"
+            >
+              {{ t('properties.moveBefore') }}
+            </button>
+            <button
+              class="props-btn"
+              :disabled="documentSaving || !nextSiblingTargetRef"
+              data-e2e="properties-move-after-btn"
+              @click="moveAfter"
+            >
+              {{ t('properties.moveAfter') }}
+            </button>
+            <button
+              class="props-btn"
+              :disabled="documentSaving || !nextSiblingTargetRef"
+              data-e2e="properties-merge-next-btn"
+              @click="mergeWithNext"
+            >
+              {{ t('properties.mergeNext') }}
+            </button>
+            <button
               class="props-btn props-btn--danger"
               :disabled="documentSaving"
               data-e2e="properties-delete-item-btn"
@@ -240,6 +264,9 @@ import { useI18n } from '../../../shared/i18n'
 import {
   buildDeleteItemCommand,
   buildInsertItemAfterCommand,
+  buildMergeItemsCommand,
+  buildMoveItemAfterCommand,
+  buildMoveItemBeforeCommand,
   buildSplitItemCommand,
 } from '../structuralCommands'
 import { bboxToPercent } from '../bboxPercent'
@@ -255,6 +282,8 @@ const props = defineProps<{
   documentSaving?: boolean
   documentCommitting?: boolean
   hasPendingDocumentEdits?: boolean
+  previousSiblingTargetRef?: string | null
+  nextSiblingTargetRef?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -371,6 +400,27 @@ function insertAfter(): void {
 function splitItem(): void {
   if (!pageElementTargetRef.value || !canSplitElement.value) return
   emit('applyDocumentEditCommands', [buildSplitItemCommand(pageElementTargetRef.value, splitIndex.value)])
+}
+
+function moveBefore(): void {
+  if (!pageElementTargetRef.value || !props.previousSiblingTargetRef) return
+  emit('applyDocumentEditCommands', [
+    buildMoveItemBeforeCommand(pageElementTargetRef.value, props.previousSiblingTargetRef),
+  ])
+}
+
+function moveAfter(): void {
+  if (!pageElementTargetRef.value || !props.nextSiblingTargetRef) return
+  emit('applyDocumentEditCommands', [
+    buildMoveItemAfterCommand(pageElementTargetRef.value, props.nextSiblingTargetRef),
+  ])
+}
+
+function mergeWithNext(): void {
+  if (!pageElementTargetRef.value || !props.nextSiblingTargetRef) return
+  emit('applyDocumentEditCommands', [
+    buildMergeItemsCommand(pageElementTargetRef.value, props.nextSiblingTargetRef),
+  ])
 }
 
 function deleteItem(): void {

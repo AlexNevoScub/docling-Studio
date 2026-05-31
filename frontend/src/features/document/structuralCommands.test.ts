@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import {
   buildDeleteItemCommand,
   buildInsertItemAfterCommand,
+  buildMergeItemsCommand,
+  buildMoveItemAfterCommand,
+  buildMoveItemBeforeCommand,
   buildSplitItemCommand,
 } from './structuralCommands'
 
@@ -27,6 +30,30 @@ describe('structuralCommands', () => {
       action: 'split_item',
       targetRef: 'draft-1',
       payload: { splitIndex: 3 },
+    })
+  })
+
+  it('builds a move_item_before command', () => {
+    expect(buildMoveItemBeforeCommand('draft-1', 'draft-2')).toEqual({
+      action: 'move_item_before',
+      targetRef: 'draft-1',
+      payload: { beforeTargetRef: 'draft-2' },
+    })
+  })
+
+  it('builds a move_item_after command', () => {
+    expect(buildMoveItemAfterCommand('draft-1', 'draft-2')).toEqual({
+      action: 'move_item_after',
+      targetRef: 'draft-1',
+      payload: { afterTargetRef: 'draft-2' },
+    })
+  })
+
+  it('builds a merge_items command', () => {
+    expect(buildMergeItemsCommand('draft-1', 'draft-2')).toEqual({
+      action: 'merge_items',
+      targetRef: 'draft-1',
+      payload: { trailingTargetRef: 'draft-2', separator: ' ' },
     })
   })
 })

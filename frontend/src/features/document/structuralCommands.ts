@@ -29,3 +29,36 @@ export function buildSplitItemCommand(
     payload: { splitIndex },
   }
 }
+
+export function buildMoveItemBeforeCommand(
+  targetRef: string,
+  beforeTargetRef: string,
+): DocumentEditCommandInput {
+  return {
+    action: 'move_item_before',
+    targetRef,
+    payload: { beforeTargetRef },
+  }
+}
+
+export function buildMoveItemAfterCommand(
+  targetRef: string,
+  afterTargetRef: string,
+): DocumentEditCommandInput {
+  return {
+    action: 'move_item_after',
+    targetRef,
+    payload: { afterTargetRef },
+  }
+}
+
+export function buildMergeItemsCommand(
+  targetRef: string,
+  trailingTargetRef: string,
+): DocumentEditCommandInput {
+  return {
+    action: 'merge_items',
+    targetRef,
+    payload: { trailingTargetRef, separator: ' ' },
+  }
+}
