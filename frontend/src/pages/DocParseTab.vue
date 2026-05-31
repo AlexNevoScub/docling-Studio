@@ -300,8 +300,9 @@ async function onSavePageElement(
 }
 
 async function onApplyDocumentEditCommands(commands: DocumentEditCommandInput[]): Promise<void> {
+  const previousTree = effectiveTree.value
   await documentStore.applyDocumentEditCommands(props.docId, commands)
-  const nextSelectedRef = postCommandSelectionRef(commands, effectiveTree.value)
+  const nextSelectedRef = postCommandSelectionRef(commands, previousTree, effectiveTree.value)
   if (nextSelectedRef) {
     setSelectedNodeRef(nextSelectedRef)
     const pageOfRef = findPageOfRef(documentStore.workspacePages, nextSelectedRef)

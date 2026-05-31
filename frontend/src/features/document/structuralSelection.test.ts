@@ -9,7 +9,7 @@ describe('structuralSelection', () => {
     ]
     const tree = [mkNode('#/texts/11', 'draft-1'), mkNode('#/texts/18', 'draft-new')]
 
-    expect(postCommandSelectionRef(commands, tree)).toBe('draft-new')
+    expect(postCommandSelectionRef(commands, tree, tree)).toBe('draft-new')
   })
 
   it('selects the trailing split sibling after split_item', () => {
@@ -18,7 +18,7 @@ describe('structuralSelection', () => {
     ]
     const tree = [mkNode('#/texts/11', 'draft-1'), mkNode('#/texts/18', 'draft-new')]
 
-    expect(postCommandSelectionRef(commands, tree)).toBe('draft-new')
+    expect(postCommandSelectionRef(commands, tree, tree)).toBe('draft-new')
   })
 
   it('keeps selection on the surviving node after merge_items', () => {
@@ -27,7 +27,7 @@ describe('structuralSelection', () => {
     ]
     const tree = [mkNode('#/texts/11', 'draft-1')]
 
-    expect(postCommandSelectionRef(commands, tree)).toBe('draft-1')
+    expect(postCommandSelectionRef(commands, tree, tree)).toBe('draft-1')
   })
 
   it('clears merge selection intent when the surviving target is missing', () => {
@@ -35,7 +35,33 @@ describe('structuralSelection', () => {
       { action: 'merge_items', targetRef: 'draft-1', payload: { trailingTargetRef: 'draft-2', separator: ' ' } },
     ]
 
-    expect(postCommandSelectionRef(commands, [])).toBeNull()
+    expect(postCommandSelectionRef(commands, [], [])).toBeNull()
+  })
+
+  it('selects the previous sibling after delete_item when available', () => {
+    const commands: DocumentEditCommandInput[] = [{ action: 'delete_item', targetRef: 'draft-2', payload: {} }]
+    const previousTree = [
+      mkNode('#/texts/11', 'draft-1'),
+      mkNode('#/texts/12', 'draft-2'),
+      mkNode('#/texts/13', 'draft-3'),
+    ]
+    const nextTree = [mkNode('#/texts/11', 'draft-1'), mkNode('#/texts/13', 'draft-3')]
+
+    expect(postCommandSelectionRef(commands, previousTree, nextTree)).toBe('draft-1')
+  })
+
+  it('falls back to the next sibling after delete_item', () => {
+    const commands: DocumentEditCommandInput[] = [{ action: 'delete_item', targetRef: 'draft-1', payload: {} }]
+    const previousTree = [mkNode('#/texts/11', 'draft-1'), mkNode('#/texts/12', 'draft-2')]
+    const nextTree = [mkNode('#/texts/12', 'draft-2')]
+
+    expect(postCommandSelectionRef(commands, previousTree, nextTree)).toBe('draft-2')
+  })
+
+  it('clears selection after delete_item when no sibling survives', () => {
+    const commands: DocumentEditCommandInput[] = [{ action: 'delete_item', targetRef: 'draft-1', payload: {} }]
+
+    expect(postCommandSelectionRef(commands, [mkNode('#/texts/11', 'draft-1')], [])).toBeNull()
   })
 
   it('returns null for commands without selection intent', () => {
@@ -43,7 +69,9 @@ describe('structuralSelection', () => {
       { action: 'move_item_after', targetRef: 'draft-1', payload: { afterTargetRef: 'draft-2' } },
     ]
 
-    expect(postCommandSelectionRef(commands, [mkNode('#/texts/11', 'draft-1')])).toBeNull()
+    expect(
+      postCommandSelectionRef(commands, [mkNode('#/texts/11', 'draft-1')], [mkNode('#/texts/11', 'draft-1')]),
+    ).toBeNull()
   })
 
   it('returns null for multi-command batches', () => {
@@ -52,7 +80,9 @@ describe('structuralSelection', () => {
       { action: 'split_item', targetRef: 'draft-2', payload: { splitIndex: 2 } },
     ]
 
-    expect(postCommandSelectionRef(commands, [mkNode('#/texts/11', 'draft-1')])).toBeNull()
+    expect(
+      postCommandSelectionRef(commands, [mkNode('#/texts/11', 'draft-1')], [mkNode('#/texts/11', 'draft-1')]),
+    ).toBeNull()
   })
 })
 
