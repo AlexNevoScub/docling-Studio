@@ -263,41 +263,74 @@ export const useDocumentStore = defineStore('document', () => {
     targetRef: string,
     payload: DocumentEditCommandInput['payload'],
   ): Promise<void> {
+    const previousDraft = clonePages(workspaceDraftPages.value ?? workspaceBasePages.value)
+    const optimisticDraft = updatePageElementLocally(previousDraft, targetRef, payload)
+    await submitDocumentEditCommands(
+      docId,
+      [
+        {
+          action: 'update_page_element',
+          targetRef,
+          payload,
+        },
+      ],
+      {
+        previousDraftPages: previousDraft,
+        optimisticDraftPages: optimisticDraft,
+        errorMessage: 'Failed to update page element',
+      },
+    )
+  }
+
+  async function applyDocumentEditCommands(
+    docId: string,
+    commands: DocumentEditCommandInput[],
+  ): Promise<void> {
+    const previousDraft = clonePages(workspaceDraftPages.value ?? workspaceBasePages.value)
+    await submitDocumentEditCommands(docId, commands, {
+      previousDraftPages: previousDraft,
+      errorMessage: 'Failed to apply document edits',
+    })
+  }
+
+  async function submitDocumentEditCommands(
+    docId: string,
+    commands: DocumentEditCommandInput[],
+    options: {
+      previousDraftPages: Page[]
+      optimisticDraftPages?: Page[]
+      errorMessage: string
+    },
+  ): Promise<void> {
     if (!documentEditSessionId.value) {
       await hydrateDocumentEditSession(docId)
     }
     if (!documentEditSessionId.value) {
       throw new Error('Document edit session is not ready')
     }
-    const previousDraft = clonePages(workspaceDraftPages.value ?? workspaceBasePages.value)
     const previousDraftTree = cloneTree(workspaceDraftTree.value)
     const previousDraftVersion = documentEditDraftVersion.value
-    workspaceDraftPages.value = updatePageElementLocally(previousDraft, targetRef, payload)
+    const hadDraftState = Boolean(previousDraftTree?.length || pendingDocumentCommands.value.length)
+    workspaceDraftPages.value = options.optimisticDraftPages ?? (hadDraftState ? options.previousDraftPages : null)
     documentEditSaving.value = true
     try {
       const session = await api.applyDocumentEditCommands(
         docId,
         documentEditSessionId.value,
         documentEditDraftVersion.value,
-        [
-          {
-            action: 'update_page_element',
-            targetRef,
-            payload,
-          },
-        ],
+        commands,
       )
       documentEditSessionId.value = session.sessionId
       documentEditBaseAnalysisId.value = session.baseAnalysisId
       documentEditDraftVersion.value = session.draftVersion
-      workspaceDraftPages.value = applySessionPages(previousDraft, session)
+      workspaceDraftPages.value = applySessionPages(options.previousDraftPages, session)
       workspaceDraftTree.value = applySessionTree(previousDraftTree, session)
       pendingDocumentCommands.value = session.pendingCommands
     } catch (e) {
       documentEditDraftVersion.value = previousDraftVersion
-      workspaceDraftPages.value = pendingDocumentCommands.value.length ? previousDraft : null
+      workspaceDraftPages.value = pendingDocumentCommands.value.length ? options.previousDraftPages : null
       workspaceDraftTree.value = pendingDocumentCommands.value.length ? previousDraftTree : null
-      workspaceError.value = (e as Error).message || 'Failed to update page element'
+      workspaceError.value = (e as Error).message || options.errorMessage
       throw e
     } finally {
       documentEditSaving.value = false
@@ -380,6 +413,7 @@ export const useDocumentStore = defineStore('document', () => {
     reloadWorkspaceVersions,
     setWorkspaceVersion,
     hydrateDocumentEditSession,
+    applyDocumentEditCommands,
     updatePageElement,
     commitPendingDocumentEdits,
     discardPendingDocumentEdits,

@@ -618,4 +618,81 @@ describe('useDocumentStore', () => {
       mkTreeNode({ ref: '#/texts/99', label: 'Sibling root' }),
     ])
   })
+
+  it('applyDocumentEditCommands() submits structural commands through the shared session flow', async () => {
+    const store = useDocumentStore()
+    store.workspaceActiveAnalysis = mkAnalysis({
+      pagesJson:
+        '[{"page_number":1,"width":600,"height":800,"elements":[{"self_ref":"#/texts/12","draftRef":"draft-1","type":"title","content":"Old","bbox":[0,0,10,10],"level":0}]}]',
+    })
+    store.documentEditSessionId = 'sess-1'
+    store.documentEditDraftVersion = 0
+    store.workspaceDraftPages = [
+      {
+        page_number: 1,
+        width: 600,
+        height: 800,
+        elements: [
+          {
+            self_ref: '#/texts/12',
+            draftRef: 'draft-1',
+            type: 'title',
+            content: 'Old',
+            bbox: [0, 0, 10, 10],
+            level: 0,
+          },
+        ],
+      },
+    ]
+    store.workspaceDraftTree = [mkTreeNode({ label: 'Old tree' })]
+
+    api.applyDocumentEditCommands.mockResolvedValue(
+      mkEditSession({
+        draftVersion: 1,
+        pages: [],
+        tree: [],
+        pagePatches: [
+          {
+            op: 'upsert',
+            pageNumber: 1,
+            page: {
+              page_number: 1,
+              width: 600,
+              height: 800,
+              elements: [
+                {
+                  self_ref: '#/texts/12',
+                  draftRef: 'draft-1',
+                  type: 'title',
+                  content: 'Structurally patched',
+                  bbox: [0, 0, 10, 10],
+                  level: 0,
+                },
+              ],
+            },
+          },
+        ],
+        treePatches: [{ op: 'replace', path: [], nodes: [mkTreeNode({ label: 'New tree' })] }],
+      }),
+    )
+
+    await store.applyDocumentEditCommands('d1', [
+      {
+        action: 'move_item_after',
+        targetRef: 'draft-1',
+        payload: { afterTargetRef: 'draft-2' },
+      },
+    ])
+
+    expect(api.applyDocumentEditCommands).toHaveBeenCalledWith('d1', 'sess-1', 0, [
+      {
+        action: 'move_item_after',
+        targetRef: 'draft-1',
+        payload: { afterTargetRef: 'draft-2' },
+      },
+    ])
+    expect(store.workspaceDraftPages?.[0].elements[0].content).toBe('Structurally patched')
+    expect(store.workspaceDraftTree).toEqual([mkTreeNode({ label: 'New tree' })])
+    expect(store.documentEditDraftVersion).toBe(1)
+  })
 })
