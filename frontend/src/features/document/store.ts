@@ -6,6 +6,9 @@ import type {
   DocumentEditCommand,
   DocumentEditCommandInput,
   DocumentEditCommitResult,
+  DocumentEditSession,
+  DocumentPagePatch,
+  DocumentTreePatch,
   DocTreeNode,
   DocumentVersion,
   PageElement,
@@ -287,8 +290,8 @@ export const useDocumentStore = defineStore('document', () => {
       documentEditSessionId.value = session.sessionId
       documentEditBaseAnalysisId.value = session.baseAnalysisId
       documentEditDraftVersion.value = session.draftVersion
-      workspaceDraftPages.value = session.pages
-      workspaceDraftTree.value = session.tree
+      workspaceDraftPages.value = applySessionPages(previousDraft, session)
+      workspaceDraftTree.value = applySessionTree(previousDraftTree, session)
       pendingDocumentCommands.value = session.pendingCommands
     } catch (e) {
       documentEditDraftVersion.value = previousDraftVersion
@@ -310,8 +313,12 @@ export const useDocumentStore = defineStore('document', () => {
         documentEditSessionId.value,
         documentEditDraftVersion.value,
       )
-      workspaceDraftPages.value = result.committed ? null : result.pages
-      workspaceDraftTree.value = result.committed ? null : result.tree
+      workspaceDraftPages.value = result.committed
+        ? null
+        : applyCommitPages(workspaceDraftPages.value, result)
+      workspaceDraftTree.value = result.committed
+        ? null
+        : applyCommitTree(workspaceDraftTree.value, result)
       if (result.committed && workspaceActiveAnalysis.value) {
         workspaceActiveAnalysis.value = await fetchAnalysis(workspaceActiveAnalysis.value.id)
         documentEditSessionId.value = null
@@ -389,6 +396,63 @@ function clonePages(pages: Page[]): Page[] {
     ...page,
     elements: page.elements.map((element) => ({ ...element })),
   }))
+}
+
+function applySessionPages(previousPages: Page[], session: DocumentEditSession): Page[] {
+  if (session.pagePatches.length) return applyPagePatches(previousPages, session.pagePatches)
+  return session.pages
+}
+
+function applySessionTree(previousTree: DocTreeNode[] | null, session: DocumentEditSession): DocTreeNode[] {
+  if (session.treePatches.length) return applyTreePatches(previousTree ?? [], session.treePatches)
+  return session.tree
+}
+
+function applyCommitPages(
+  previousPages: Page[] | null,
+  result: DocumentEditCommitResult,
+): Page[] {
+  if (result.pagePatches.length) return applyPagePatches(previousPages ?? [], result.pagePatches)
+  return result.pages
+}
+
+function applyCommitTree(
+  previousTree: DocTreeNode[] | null,
+  result: DocumentEditCommitResult,
+): DocTreeNode[] {
+  if (result.treePatches.length) return applyTreePatches(previousTree ?? [], result.treePatches)
+  return result.tree
+}
+
+function applyPagePatches(previousPages: Page[], patches: DocumentPagePatch[]): Page[] {
+  const pagesByNumber = new Map(previousPages.map((page) => [page.page_number, clonePage(page)]))
+  for (const patch of patches) {
+    if (patch.op === 'remove') {
+      pagesByNumber.delete(patch.pageNumber)
+      continue
+    }
+    if (patch.page) {
+      pagesByNumber.set(patch.pageNumber, clonePage(patch.page))
+    }
+  }
+  return [...pagesByNumber.values()].sort((a, b) => a.page_number - b.page_number)
+}
+
+function applyTreePatches(previousTree: DocTreeNode[], patches: DocumentTreePatch[]): DocTreeNode[] {
+  let nextTree = cloneTree(previousTree) ?? []
+  for (const patch of patches) {
+    if (patch.op === 'replace' && patch.path.length === 0) {
+      nextTree = cloneTree(patch.nodes) ?? []
+    }
+  }
+  return nextTree
+}
+
+function clonePage(page: Page): Page {
+  return {
+    ...page,
+    elements: page.elements.map((element) => ({ ...element })),
+  }
 }
 
 function cloneTree(tree: DocTreeNode[] | null): DocTreeNode[] | null {

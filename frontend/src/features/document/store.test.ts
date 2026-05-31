@@ -39,6 +39,9 @@ describe('useDocumentStore', () => {
       draftVersion: 0,
       pages: [],
       tree: [],
+      pagePatches: [],
+      treePatches: [],
+      refRemaps: [],
       pendingCommands: [],
     })
   })
@@ -247,6 +250,9 @@ describe('useDocumentStore', () => {
     draftVersion: 1,
     pages: [],
     tree: [mkTreeNode()],
+    pagePatches: [],
+    treePatches: [],
+    refRemaps: [],
     pendingCommands: [
       {
         id: 'cmd-1',
@@ -451,11 +457,118 @@ describe('useDocumentStore', () => {
       differences: [{ ref: '#/texts/12', field: 'content', frontend: 'A', backend: 'B' }],
       pages: [{ page_number: 1, width: 600, height: 800, elements: [] }],
       tree: [mkTreeNode({ label: 'Backend truth' })],
+      pagePatches: [],
+      treePatches: [],
+      refRemaps: [],
     })
 
     const result = await store.commitPendingDocumentEdits('d1')
 
     expect(result?.committed).toBe(false)
     expect(store.workspaceDraftTree).toEqual([mkTreeNode({ label: 'Backend truth' })])
+  })
+
+  it('updatePageElement() applies backend patches over the optimistic draft', async () => {
+    const store = useDocumentStore()
+    store.workspaceActiveAnalysis = mkAnalysis({
+      pagesJson:
+        '[{"page_number":1,"width":600,"height":800,"elements":[{"self_ref":"#/texts/12","draftRef":"draft-1","type":"title","content":"Old","bbox":[0,0,10,10],"level":0}]}]',
+    })
+    store.documentEditSessionId = 'sess-1'
+    store.documentEditDraftVersion = 0
+
+    api.applyDocumentEditCommands.mockResolvedValue(
+      mkEditSession({
+        draftVersion: 1,
+        pages: [],
+        tree: [],
+        pagePatches: [
+          {
+            op: 'upsert',
+            pageNumber: 1,
+            page: {
+              page_number: 1,
+              width: 600,
+              height: 800,
+              elements: [
+                {
+                  self_ref: '#/texts/12',
+                  draftRef: 'draft-1',
+                  type: 'title',
+                  content: 'Patched',
+                  bbox: [0, 0, 10, 10],
+                  level: 0,
+                },
+              ],
+            },
+          },
+        ],
+        treePatches: [{ op: 'replace', path: [], nodes: [mkTreeNode({ label: 'Patched tree' })] }],
+      }),
+    )
+
+    await store.updatePageElement('d1', 'draft-1', { content: 'Optimistic' })
+
+    expect(store.workspaceDraftPages?.[0].elements[0].content).toBe('Patched')
+    expect(store.workspaceDraftTree).toEqual([mkTreeNode({ label: 'Patched tree' })])
+  })
+
+  it('commitPendingDocumentEdits() applies backend patches on inconsistent commit', async () => {
+    const store = useDocumentStore()
+    store.documentEditSessionId = 'sess-1'
+    store.documentEditDraftVersion = 1
+    store.workspaceDraftPages = [
+      {
+        page_number: 1,
+        width: 600,
+        height: 800,
+        elements: [
+          {
+            self_ref: '#/texts/12',
+            draftRef: 'draft-1',
+            type: 'title',
+            content: 'Frontend draft',
+            bbox: [0, 0, 10, 10],
+            level: 0,
+          },
+        ],
+      },
+    ]
+    store.workspaceDraftTree = [mkTreeNode({ label: 'Frontend draft' })]
+    api.commitDocumentEdits.mockResolvedValue({
+      committed: false,
+      consistent: false,
+      differences: [{ ref: '#/texts/12', field: 'content', frontend: 'A', backend: 'B' }],
+      pages: [],
+      tree: [],
+      pagePatches: [
+        {
+          op: 'upsert',
+          pageNumber: 1,
+          page: {
+            page_number: 1,
+            width: 600,
+            height: 800,
+            elements: [
+              {
+                self_ref: '#/texts/12',
+                draftRef: 'draft-1',
+                type: 'title',
+                content: 'Backend truth',
+                bbox: [0, 0, 10, 10],
+                level: 0,
+              },
+            ],
+          },
+        },
+      ],
+      treePatches: [{ op: 'replace', path: [], nodes: [mkTreeNode({ label: 'Backend patched tree' })] }],
+      refRemaps: [],
+    })
+
+    await store.commitPendingDocumentEdits('d1')
+
+    expect(store.workspaceDraftPages?.[0].elements[0].content).toBe('Backend truth')
+    expect(store.workspaceDraftTree).toEqual([mkTreeNode({ label: 'Backend patched tree' })])
   })
 })
