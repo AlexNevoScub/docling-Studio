@@ -694,5 +694,35 @@ describe('useDocumentStore', () => {
     expect(store.workspaceDraftPages?.[0].elements[0].content).toBe('Structurally patched')
     expect(store.workspaceDraftTree).toEqual([mkTreeNode({ label: 'New tree' })])
     expect(store.documentEditDraftVersion).toBe(1)
+    expect(store.documentEditRefRemaps).toEqual([])
+  })
+
+  it('applyDocumentEditCommands() stores backend ref remaps for later selection reconciliation', async () => {
+    const store = useDocumentStore()
+    store.workspaceActiveAnalysis = mkAnalysis({
+      pagesJson:
+        '[{"page_number":1,"width":600,"height":800,"elements":[{"self_ref":"#/texts/12","draftRef":"draft-1","type":"title","content":"Old","bbox":[0,0,10,10],"level":0}]}]',
+    })
+    store.documentEditSessionId = 'sess-1'
+    store.documentEditDraftVersion = 0
+
+    api.applyDocumentEditCommands.mockResolvedValue(
+      mkEditSession({
+        draftVersion: 1,
+        refRemaps: [{ draftRef: 'draft-2', selfRef: '#/texts/12', nodeKind: 'TextItem' }],
+      }),
+    )
+
+    await store.applyDocumentEditCommands('d1', [
+      {
+        action: 'move_item_after',
+        targetRef: 'draft-1',
+        payload: { afterTargetRef: 'draft-2' },
+      },
+    ])
+
+    expect(store.documentEditRefRemaps).toEqual([
+      { draftRef: 'draft-2', selfRef: '#/texts/12', nodeKind: 'TextItem' },
+    ])
   })
 })

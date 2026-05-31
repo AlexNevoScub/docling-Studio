@@ -6,6 +6,7 @@ import type {
   DocumentEditCommand,
   DocumentEditCommandInput,
   DocumentEditCommitResult,
+  DocumentRefRemap,
   DocumentEditSession,
   DocumentPagePatch,
   DocumentTreePatch,
@@ -40,6 +41,7 @@ export const useDocumentStore = defineStore('document', () => {
   const documentEditSessionId = ref<string | null>(null)
   const documentEditBaseAnalysisId = ref<string | null>(null)
   const documentEditDraftVersion = ref(0)
+  const documentEditRefRemaps = ref<DocumentRefRemap[]>([])
   const pendingDocumentCommands = ref<DocumentEditCommand[]>([])
   const documentEditSaving = ref(false)
   const documentEditCommitting = ref(false)
@@ -156,6 +158,7 @@ export const useDocumentStore = defineStore('document', () => {
     documentEditSessionId.value = null
     documentEditBaseAnalysisId.value = null
     documentEditDraftVersion.value = 0
+    documentEditRefRemaps.value = []
     pendingDocumentCommands.value = []
     try {
       const [doc, versions] = await Promise.all([
@@ -244,12 +247,14 @@ export const useDocumentStore = defineStore('document', () => {
     documentEditSessionId.value = null
     documentEditBaseAnalysisId.value = null
     documentEditDraftVersion.value = 0
+    documentEditRefRemaps.value = []
     if (!workspaceActiveAnalysis.value?.hasDocumentJson) return
     try {
       const session = await api.fetchDocumentEditSession(docId)
       documentEditSessionId.value = session.sessionId
       documentEditBaseAnalysisId.value = session.baseAnalysisId
       documentEditDraftVersion.value = session.draftVersion
+      documentEditRefRemaps.value = session.refRemaps
       pendingDocumentCommands.value = session.pendingCommands
       workspaceDraftPages.value = session.pendingCommands.length ? session.pages : null
       workspaceDraftTree.value = session.pendingCommands.length ? session.tree : null
@@ -323,6 +328,7 @@ export const useDocumentStore = defineStore('document', () => {
       documentEditSessionId.value = session.sessionId
       documentEditBaseAnalysisId.value = session.baseAnalysisId
       documentEditDraftVersion.value = session.draftVersion
+      documentEditRefRemaps.value = session.refRemaps
       workspaceDraftPages.value = applySessionPages(options.previousDraftPages, session)
       workspaceDraftTree.value = applySessionTree(previousDraftTree, session)
       pendingDocumentCommands.value = session.pendingCommands
@@ -352,11 +358,13 @@ export const useDocumentStore = defineStore('document', () => {
       workspaceDraftTree.value = result.committed
         ? null
         : applyCommitTree(workspaceDraftTree.value, result)
+      documentEditRefRemaps.value = result.committed ? [] : result.refRemaps
       if (result.committed && workspaceActiveAnalysis.value) {
         workspaceActiveAnalysis.value = await fetchAnalysis(workspaceActiveAnalysis.value.id)
         documentEditSessionId.value = null
         documentEditBaseAnalysisId.value = null
         documentEditDraftVersion.value = 0
+        documentEditRefRemaps.value = []
         pendingDocumentCommands.value = []
       }
       return result
@@ -376,6 +384,7 @@ export const useDocumentStore = defineStore('document', () => {
       documentEditSessionId.value = null
       documentEditBaseAnalysisId.value = null
       documentEditDraftVersion.value = 0
+      documentEditRefRemaps.value = []
       pendingDocumentCommands.value = []
     } catch (e) {
       workspaceError.value = (e as Error).message || 'Failed to discard document edits'
@@ -399,6 +408,7 @@ export const useDocumentStore = defineStore('document', () => {
     documentEditSessionId,
     documentEditBaseAnalysisId,
     documentEditDraftVersion,
+    documentEditRefRemaps,
     pendingDocumentCommands,
     documentEditSaving,
     documentEditCommitting,

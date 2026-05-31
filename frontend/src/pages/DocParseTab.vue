@@ -127,6 +127,7 @@ import type { DocChunk, DocTreeNode, ElementType, PageElement } from '../shared/
 import { useAnalysisStore } from '../features/analysis/store'
 import { useChunksStore } from '../features/chunks/store'
 import { fetchDocumentTree } from '../features/document/api'
+import { reconcileSelectedDraftRef, resolveSelectedSelfRef } from '../features/document/editSelection'
 import { useDocumentStore } from '../features/document/store'
 import { chunkForElement } from '../features/document/linkedView'
 import DocTreeRail from '../features/document/ui/DocTreeRail.vue'
@@ -168,6 +169,7 @@ const treeLoading = ref(false)
 const treeError = ref<string | null>(null)
 const filter = ref('')
 const selectedNodeRef = ref<string | null>(null)
+const selectedNodeSelfRef = ref<string | null>(null)
 const transientPageElementPreview = ref<{
   targetRef: string
   payload: { content?: string; bbox?: [number, number, number, number]; type?: ElementType }
@@ -254,7 +256,7 @@ function clearPageElementPreview(): void {
 }
 
 function onTreeSelect(ref: string): void {
-  selectedNodeRef.value = ref
+  setSelectedNodeRef(ref)
   const pageOfRef = findPageOfRef(documentStore.workspacePages, ref)
   if (pageOfRef !== null && pageOfRef !== currentPage.value) {
     currentPage.value = pageOfRef
@@ -267,7 +269,7 @@ function onHoverElement(_el: PageElement | null): void {
 
 function onClickElement(el: PageElement): void {
   const ref = elementDraftRef(el)
-  if (ref) selectedNodeRef.value = ref
+  if (ref) setSelectedNodeRef(ref)
 }
 
 async function onSaveChunk(chunkId: string, text: string): Promise<void> {
@@ -308,7 +310,7 @@ onMounted(async () => {
 watch(
   () => props.docId,
   async (id) => {
-    selectedNodeRef.value = null
+    clearSelection()
     filter.value = ''
     await Promise.all([documentStore.loadWorkspace(id), chunksStore.load(id), loadTree()])
     const first = documentStore.workspacePages[0]?.page_number
@@ -325,9 +327,21 @@ watch(
   () => documentStore.workspaceActiveAnalysis?.id,
   (newId, oldId) => {
     if (newId && newId !== oldId) {
-      selectedNodeRef.value = null
+      clearSelection()
       loadTree()
     }
+  },
+)
+
+watch(
+  [
+    () => documentStore.documentEditDraftVersion,
+    () => documentStore.documentEditRefRemaps,
+    effectiveTree,
+    () => documentStore.workspacePages,
+  ],
+  () => {
+    reconcileSelection()
   },
 )
 
@@ -366,6 +380,47 @@ function findPageOfRef(
 
 function elementDraftRef(element: Pick<PageElement, 'draftRef' | 'self_ref'>): string | null {
   return element.draftRef ?? element.self_ref ?? null
+}
+
+function setSelectedNodeRef(ref: string | null): void {
+  selectedNodeRef.value = ref
+  selectedNodeSelfRef.value = resolveSelectedSelfRef(
+    ref,
+    effectiveTree.value,
+    documentStore.workspacePages,
+  )
+}
+
+function clearSelection(): void {
+  selectedNodeRef.value = null
+  selectedNodeSelfRef.value = null
+}
+
+function reconcileSelection(): void {
+  if (!selectedNodeRef.value) return
+  const nextSelectedRef = reconcileSelectedDraftRef(
+    selectedNodeRef.value,
+    selectedNodeSelfRef.value,
+    effectiveTree.value,
+    documentStore.workspacePages,
+    documentStore.documentEditRefRemaps,
+  )
+  if (!nextSelectedRef) {
+    clearSelection()
+    return
+  }
+  if (nextSelectedRef !== selectedNodeRef.value) {
+    selectedNodeRef.value = nextSelectedRef
+  }
+  selectedNodeSelfRef.value = resolveSelectedSelfRef(
+    nextSelectedRef,
+    effectiveTree.value,
+    documentStore.workspacePages,
+  )
+  const pageOfRef = findPageOfRef(documentStore.workspacePages, nextSelectedRef)
+  if (pageOfRef !== null && pageOfRef !== currentPage.value) {
+    currentPage.value = pageOfRef
+  }
 }
 </script>
 
