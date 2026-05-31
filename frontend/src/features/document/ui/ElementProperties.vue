@@ -108,7 +108,7 @@
           <div class="props-edit-actions">
             <button
               class="props-btn props-btn--primary"
-              :disabled="documentSaving || !insertAfterContent.trim()"
+              :disabled="!structuralState.canInsertAfter"
               data-e2e="properties-insert-after-btn"
               @click="insertAfter"
             >
@@ -131,7 +131,7 @@
           <div class="props-edit-actions">
             <button
               class="props-btn props-btn--primary"
-              :disabled="documentSaving || !canSplitElement"
+              :disabled="!structuralState.canSplit"
               data-e2e="properties-split-item-btn"
               @click="splitItem"
             >
@@ -139,7 +139,7 @@
             </button>
             <button
               class="props-btn"
-              :disabled="documentSaving || !previousSiblingTargetRef"
+              :disabled="!structuralState.canMoveBefore"
               data-e2e="properties-move-before-btn"
               @click="moveBefore"
             >
@@ -147,7 +147,7 @@
             </button>
             <button
               class="props-btn"
-              :disabled="documentSaving || !nextSiblingTargetRef"
+              :disabled="!structuralState.canMoveAfter"
               data-e2e="properties-move-after-btn"
               @click="moveAfter"
             >
@@ -155,7 +155,7 @@
             </button>
             <button
               class="props-btn"
-              :disabled="documentSaving || !nextSiblingTargetRef"
+              :disabled="!structuralState.canMergeNext"
               data-e2e="properties-merge-next-btn"
               @click="mergeWithNext"
             >
@@ -163,7 +163,7 @@
             </button>
             <button
               class="props-btn"
-              :disabled="documentSaving || !previousGroupTargetRef"
+              :disabled="!structuralState.canMoveIntoPreviousGroup"
               data-e2e="properties-move-into-previous-group-btn"
               @click="moveIntoPreviousGroup"
             >
@@ -171,7 +171,7 @@
             </button>
             <button
               class="props-btn"
-              :disabled="documentSaving || !nextGroupTargetRef"
+              :disabled="!structuralState.canMoveIntoNextGroup"
               data-e2e="properties-move-into-next-group-btn"
               @click="moveIntoNextGroup"
             >
@@ -179,7 +179,7 @@
             </button>
             <button
               class="props-btn"
-              :disabled="documentSaving || !parentGroupTargetRef"
+              :disabled="!structuralState.canMoveToParentGroup"
               data-e2e="properties-move-to-parent-group-btn"
               @click="moveToParentGroup"
             >
@@ -187,7 +187,7 @@
             </button>
             <button
               class="props-btn props-btn--danger"
-              :disabled="documentSaving"
+              :disabled="!structuralState.canDelete"
               data-e2e="properties-delete-item-btn"
               @click="deleteItem"
             >
@@ -285,17 +285,9 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import type { DocChunk, DocumentEditCommandInput, ElementType, PageElement } from '../../../shared/types'
 import { useI18n } from '../../../shared/i18n'
-import {
-  buildDeleteItemCommand,
-  buildInsertItemAfterCommand,
-  buildMergeItemsCommand,
-  buildMoveItemAfterCommand,
-  buildMoveItemBeforeCommand,
-  buildReparentItemCommand,
-  buildSplitItemCommand,
-} from '../structuralCommands'
 import { bboxToPercent } from '../bboxPercent'
 import { colorFor } from '../elementColors'
+import { structuralPanelCommand, structuralPanelState } from '../structuralPanel'
 
 const props = defineProps<{
   element: PageElement | null
@@ -342,10 +334,21 @@ const insertAfterContent = ref('')
 const splitIndex = ref(1)
 
 const pageElementTargetRef = computed(() => props.element?.draftRef ?? props.element?.self_ref ?? null)
-const maxSplitIndex = computed(() => Math.max(0, draftContent.value.length - 1))
-const canSplitElement = computed(
-  () => Boolean(pageElementTargetRef.value) && splitIndex.value > 0 && splitIndex.value <= maxSplitIndex.value,
+const structuralState = computed(() =>
+  structuralPanelState({
+    targetRef: pageElementTargetRef.value,
+    draftContent: draftContent.value,
+    insertAfterContent: insertAfterContent.value,
+    splitIndex: splitIndex.value,
+    documentSaving: Boolean(props.documentSaving),
+    previousSiblingTargetRef: props.previousSiblingTargetRef,
+    nextSiblingTargetRef: props.nextSiblingTargetRef,
+    previousGroupTargetRef: props.previousGroupTargetRef,
+    nextGroupTargetRef: props.nextGroupTargetRef,
+    parentGroupTargetRef: props.parentGroupTargetRef,
+  }),
 )
+const maxSplitIndex = computed(() => structuralState.value.maxSplitIndex)
 
 const typeOptions: ElementType[] = [
   'text',
@@ -418,63 +421,73 @@ function savePageElement(): void {
 }
 
 function insertAfter(): void {
-  if (!pageElementTargetRef.value) return
-  const content = insertAfterContent.value.trim()
-  if (!content) return
-  emit('applyDocumentEditCommands', [buildInsertItemAfterCommand(pageElementTargetRef.value, content)])
+  const commands = structuralPanelCommand('insertAfter', structuralPanelInputs())
+  if (!commands) return
+  emit('applyDocumentEditCommands', commands)
   insertAfterContent.value = ''
 }
 
 function splitItem(): void {
-  if (!pageElementTargetRef.value || !canSplitElement.value) return
-  emit('applyDocumentEditCommands', [buildSplitItemCommand(pageElementTargetRef.value, splitIndex.value)])
+  const commands = structuralPanelCommand('splitItem', structuralPanelInputs())
+  if (!commands) return
+  emit('applyDocumentEditCommands', commands)
 }
 
 function moveBefore(): void {
-  if (!pageElementTargetRef.value || !props.previousSiblingTargetRef) return
-  emit('applyDocumentEditCommands', [
-    buildMoveItemBeforeCommand(pageElementTargetRef.value, props.previousSiblingTargetRef),
-  ])
+  const commands = structuralPanelCommand('moveBefore', structuralPanelInputs())
+  if (!commands) return
+  emit('applyDocumentEditCommands', commands)
 }
 
 function moveAfter(): void {
-  if (!pageElementTargetRef.value || !props.nextSiblingTargetRef) return
-  emit('applyDocumentEditCommands', [
-    buildMoveItemAfterCommand(pageElementTargetRef.value, props.nextSiblingTargetRef),
-  ])
+  const commands = structuralPanelCommand('moveAfter', structuralPanelInputs())
+  if (!commands) return
+  emit('applyDocumentEditCommands', commands)
 }
 
 function mergeWithNext(): void {
-  if (!pageElementTargetRef.value || !props.nextSiblingTargetRef) return
-  emit('applyDocumentEditCommands', [
-    buildMergeItemsCommand(pageElementTargetRef.value, props.nextSiblingTargetRef),
-  ])
+  const commands = structuralPanelCommand('mergeWithNext', structuralPanelInputs())
+  if (!commands) return
+  emit('applyDocumentEditCommands', commands)
 }
 
 function moveIntoPreviousGroup(): void {
-  if (!pageElementTargetRef.value || !props.previousGroupTargetRef) return
-  emit('applyDocumentEditCommands', [
-    buildReparentItemCommand(pageElementTargetRef.value, props.previousGroupTargetRef),
-  ])
+  const commands = structuralPanelCommand('moveIntoPreviousGroup', structuralPanelInputs())
+  if (!commands) return
+  emit('applyDocumentEditCommands', commands)
 }
 
 function moveIntoNextGroup(): void {
-  if (!pageElementTargetRef.value || !props.nextGroupTargetRef) return
-  emit('applyDocumentEditCommands', [
-    buildReparentItemCommand(pageElementTargetRef.value, props.nextGroupTargetRef),
-  ])
+  const commands = structuralPanelCommand('moveIntoNextGroup', structuralPanelInputs())
+  if (!commands) return
+  emit('applyDocumentEditCommands', commands)
 }
 
 function moveToParentGroup(): void {
-  if (!pageElementTargetRef.value || !props.parentGroupTargetRef) return
-  emit('applyDocumentEditCommands', [
-    buildReparentItemCommand(pageElementTargetRef.value, props.parentGroupTargetRef),
-  ])
+  const commands = structuralPanelCommand('moveToParentGroup', structuralPanelInputs())
+  if (!commands) return
+  emit('applyDocumentEditCommands', commands)
 }
 
 function deleteItem(): void {
-  if (!pageElementTargetRef.value) return
-  emit('applyDocumentEditCommands', [buildDeleteItemCommand(pageElementTargetRef.value)])
+  const commands = structuralPanelCommand('deleteItem', structuralPanelInputs())
+  if (!commands) return
+  emit('applyDocumentEditCommands', commands)
+}
+
+function structuralPanelInputs() {
+  return {
+    targetRef: pageElementTargetRef.value,
+    draftContent: draftContent.value,
+    insertAfterContent: insertAfterContent.value,
+    splitIndex: splitIndex.value,
+    documentSaving: Boolean(props.documentSaving),
+    previousSiblingTargetRef: props.previousSiblingTargetRef,
+    nextSiblingTargetRef: props.nextSiblingTargetRef,
+    previousGroupTargetRef: props.previousGroupTargetRef,
+    nextGroupTargetRef: props.nextGroupTargetRef,
+    parentGroupTargetRef: props.parentGroupTargetRef,
+  }
 }
 
 function currentPageElementPayload(): {
