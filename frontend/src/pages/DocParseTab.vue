@@ -139,6 +139,7 @@ import {
   adjacentSiblingRefs,
   parentGroupTargetRef,
 } from '../features/document/siblingTargets'
+import { postCommandSelectionRef } from '../features/document/structuralSelection'
 import { useDocumentStore } from '../features/document/store'
 import { chunkForElement } from '../features/document/linkedView'
 import DocTreeRail from '../features/document/ui/DocTreeRail.vue'
@@ -300,6 +301,14 @@ async function onSavePageElement(
 
 async function onApplyDocumentEditCommands(commands: DocumentEditCommandInput[]): Promise<void> {
   await documentStore.applyDocumentEditCommands(props.docId, commands)
+  const nextSelectedRef = postCommandSelectionRef(commands, effectiveTree.value)
+  if (nextSelectedRef) {
+    setSelectedNodeRef(nextSelectedRef)
+    const pageOfRef = findPageOfRef(documentStore.workspacePages, nextSelectedRef)
+    if (pageOfRef !== null && pageOfRef !== currentPage.value) {
+      currentPage.value = pageOfRef
+    }
+  }
   clearPageElementPreview()
 }
 
