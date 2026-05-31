@@ -46,6 +46,9 @@ async def get_session(doc_id: str, service: ServiceDep) -> DocumentEditSessionRe
         draft_version=payload["draftVersion"],
         pages=payload["pages"],
         tree=payload["tree"],
+        page_patches=payload.get("pagePatches", []),
+        tree_patches=payload.get("treePatches", []),
+        ref_remaps=payload.get("refRemaps", []),
         pending_commands=[DocumentEditCommandResponse(**cmd) for cmd in payload["pendingCommands"]],
     )
 
@@ -73,6 +76,9 @@ async def apply_commands(
         draft_version=payload["draftVersion"],
         pages=payload["pages"],
         tree=payload["tree"],
+        page_patches=payload.get("pagePatches", []),
+        tree_patches=payload.get("treePatches", []),
+        ref_remaps=payload.get("refRemaps", []),
         pending_commands=[DocumentEditCommandResponse(**cmd) for cmd in payload["pendingCommands"]],
     )
 

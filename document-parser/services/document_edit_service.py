@@ -84,13 +84,18 @@ class DocumentEditService:
         document = self._load_doc(analysis.document_json)
         bindings = await self._ensure_bindings(session, document)
         document = self._apply_edits(document, edits, bindings)
+        pages = self._render_pages(document, bindings)
+        tree = self._render_tree(document, bindings)
         return {
             "sessionId": session.id,
             "analysisId": analysis.id,
             "baseAnalysisId": session.base_analysis_id,
             "draftVersion": session.draft_version,
-            "pages": self._render_pages(document, bindings),
-            "tree": self._render_tree(document, bindings),
+            "pages": pages,
+            "tree": tree,
+            "pagePatches": [],
+            "treePatches": [],
+            "refRemaps": self._render_ref_remaps(bindings),
             "pendingCommands": [self._edit_to_dict(edit) for edit in edits],
         }
 
@@ -117,8 +122,16 @@ class DocumentEditService:
             self._command_to_edit(document_id, analysis.id, command, actor=actor or self._actor)
             for command in commands
         ]
-        bindings = await self._ensure_bindings(session, self._load_doc(analysis.document_json))
-        preview_document = self._preview_document(analysis, [*pending, *new_edits], bindings)
+        base_document = self._load_doc(analysis.document_json)
+        bindings = await self._ensure_bindings(session, base_document)
+        previous_document = self._apply_edits(
+            self._load_doc(analysis.document_json), pending, bindings
+        )
+        preview_document = self._apply_edits(base_document, [*pending, *new_edits], bindings)
+        previous_pages = self._render_pages(previous_document, bindings)
+        preview_pages = self._render_pages(preview_document, bindings)
+        previous_tree = self._render_tree(previous_document, bindings)
+        preview_tree = self._render_tree(preview_document, bindings)
         for edit in new_edits:
             await self._edits.insert(edit)
         session.draft_version += 1
@@ -129,8 +142,11 @@ class DocumentEditService:
             "analysisId": analysis.id,
             "baseAnalysisId": session.base_analysis_id,
             "draftVersion": session.draft_version,
-            "pages": self._render_pages(preview_document, bindings),
-            "tree": self._render_tree(preview_document, bindings),
+            "pages": preview_pages,
+            "tree": preview_tree,
+            "pagePatches": self._build_page_patches(previous_pages, preview_pages),
+            "treePatches": self._build_tree_patches(previous_tree, preview_tree),
+            "refRemaps": self._render_ref_remaps(bindings),
             "pendingCommands": [self._edit_to_dict(cmd) for cmd in [*pending, *new_edits]],
         }
 
@@ -163,6 +179,8 @@ class DocumentEditService:
 
         document = self._load_doc(analysis.document_json)
         bindings = await self._ensure_bindings(session, document)
+        previous_pages = self._render_pages(document, bindings)
+        previous_tree = self._render_tree(document, bindings)
         document = self._apply_edits(document, pending, bindings)
         backend_pages = self._render_pages(document, bindings)
         backend_tree = self._render_tree(document, bindings)
@@ -181,6 +199,9 @@ class DocumentEditService:
             "differences": [],
             "pages": backend_pages,
             "tree": backend_tree,
+            "pagePatches": self._build_page_patches(previous_pages, backend_pages),
+            "treePatches": self._build_tree_patches(previous_tree, backend_tree),
+            "refRemaps": self._render_ref_remaps(bindings),
         }
 
     async def discard(self, document_id: str) -> int:
@@ -671,6 +692,52 @@ class DocumentEditService:
             children = node.get("children")
             if isinstance(children, list):
                 self._attach_tree_draft_refs(children, bindings_by_self_ref)
+
+    def _render_ref_remaps(self, bindings: dict[str, DraftNodeBinding]) -> list[dict[str, Any]]:
+        return [
+            {
+                "draftRef": binding.draft_ref,
+                "selfRef": binding.self_ref,
+                "nodeKind": binding.node_kind,
+            }
+            for binding in bindings.values()
+        ]
+
+    def _build_page_patches(
+        self,
+        previous_pages: list[dict[str, Any]],
+        next_pages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        previous_by_number = {
+            int(page.get("page_number") or 0): page
+            for page in previous_pages
+            if page.get("page_number")
+        }
+        next_by_number = {
+            int(page.get("page_number") or 0): page
+            for page in next_pages
+            if page.get("page_number")
+        }
+        page_numbers = sorted(set(previous_by_number) | set(next_by_number))
+        patches: list[dict[str, Any]] = []
+        for page_number in page_numbers:
+            previous_page = previous_by_number.get(page_number)
+            next_page = next_by_number.get(page_number)
+            if next_page is None:
+                patches.append({"op": "remove", "pageNumber": page_number})
+                continue
+            if previous_page != next_page:
+                patches.append({"op": "upsert", "pageNumber": page_number, "page": next_page})
+        return patches
+
+    def _build_tree_patches(
+        self,
+        previous_tree: list[dict[str, Any]],
+        next_tree: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if previous_tree == next_tree:
+            return []
+        return [{"op": "replace", "path": [], "nodes": next_tree}]
 
     async def _ensure_bindings(
         self,

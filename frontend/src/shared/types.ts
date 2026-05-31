@@ -120,6 +120,9 @@ export interface DocumentEditSession {
   draftVersion: number
   pages: Page[]
   tree: DocTreeNode[]
+  pagePatches: DocumentPagePatch[]
+  treePatches: DocumentTreePatch[]
+  refRemaps: DocumentRefRemap[]
   pendingCommands: DocumentEditCommand[]
 }
 
@@ -134,6 +137,27 @@ export interface DocumentEditCommitResult {
   }>
   pages: Page[]
   tree: DocTreeNode[]
+  pagePatches: DocumentPagePatch[]
+  treePatches: DocumentTreePatch[]
+  refRemaps: DocumentRefRemap[]
+}
+
+export interface DocumentPagePatch {
+  op: 'upsert' | 'remove'
+  pageNumber: number
+  page?: Page
+}
+
+export interface DocumentTreePatch {
+  op: 'replace'
+  path: string[]
+  nodes: DocTreeNode[]
+}
+
+export interface DocumentRefRemap {
+  draftRef: string
+  selfRef: string | null
+  nodeKind: string
 }
 
 export interface ChunkingOptions {

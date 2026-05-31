@@ -68,6 +68,18 @@ def _pages() -> list[dict]:
     ]
 
 
+def _page_patches() -> list[dict]:
+    return [{"op": "upsert", "pageNumber": 1, "page": _pages()[0]}]
+
+
+def _tree_patches(label: str = "Draft title") -> list[dict]:
+    return [{"op": "replace", "path": [], "nodes": _tree(label)}]
+
+
+def _ref_remaps() -> list[dict]:
+    return [{"draftRef": "draft-1", "selfRef": "#/texts/12", "nodeKind": "TextItem"}]
+
+
 class TestDocumentEditSessionRoutes:
     def test_get_session_returns_tree(self, client, mock_service):
         mock_service.get_session = AsyncMock(
@@ -78,6 +90,9 @@ class TestDocumentEditSessionRoutes:
                 "draftVersion": 0,
                 "pages": _pages(),
                 "tree": _tree(),
+                "pagePatches": [],
+                "treePatches": [],
+                "refRemaps": _ref_remaps(),
                 "pendingCommands": [_pending_command()],
             }
         )
@@ -88,6 +103,7 @@ class TestDocumentEditSessionRoutes:
         body = resp.json()
         assert body["sessionId"] == "sess-1"
         assert body["tree"] == _tree()
+        assert body["refRemaps"] == _ref_remaps()
         assert body["pendingCommands"][0]["action"] == "update_page_element"
 
     def test_apply_commands_returns_tree(self, client, mock_service):
@@ -99,6 +115,9 @@ class TestDocumentEditSessionRoutes:
                 "draftVersion": 1,
                 "pages": _pages(),
                 "tree": _tree("Updated heading"),
+                "pagePatches": _page_patches(),
+                "treePatches": _tree_patches("Updated heading"),
+                "refRemaps": _ref_remaps(),
                 "pendingCommands": [_pending_command()],
             }
         )
@@ -122,6 +141,8 @@ class TestDocumentEditSessionRoutes:
         body = resp.json()
         assert body["draftVersion"] == 1
         assert body["tree"] == _tree("Updated heading")
+        assert body["pagePatches"] == _page_patches()
+        assert body["treePatches"] == _tree_patches("Updated heading")
         mock_service.apply_commands.assert_awaited_once()
 
     def test_commit_returns_tree(self, client, mock_service):
@@ -132,6 +153,9 @@ class TestDocumentEditSessionRoutes:
                 "differences": [{"ref": "#/texts/12", "field": "content"}],
                 "pages": _pages(),
                 "tree": _tree("Backend truth"),
+                "pagePatches": _page_patches(),
+                "treePatches": _tree_patches("Backend truth"),
+                "refRemaps": _ref_remaps(),
             }
         )
 
@@ -144,3 +168,4 @@ class TestDocumentEditSessionRoutes:
         body = resp.json()
         assert body["committed"] is False
         assert body["tree"] == _tree("Backend truth")
+        assert body["treePatches"] == _tree_patches("Backend truth")

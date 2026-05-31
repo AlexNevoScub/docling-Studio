@@ -129,6 +129,9 @@ class DocumentEditSessionResponse(_CamelModel):
     draft_version: int
     pages: list[dict] = Field(default_factory=list)
     tree: list[dict] = Field(default_factory=list)
+    page_patches: list[dict] = Field(default_factory=list)
+    tree_patches: list[dict] = Field(default_factory=list)
+    ref_remaps: list[dict] = Field(default_factory=list)
     pending_commands: list[DocumentEditCommandResponse] = Field(default_factory=list)
 
 
@@ -155,6 +158,9 @@ class DocumentEditCommitResponse(_CamelModel):
     differences: list[dict] = Field(default_factory=list)
     pages: list[dict] = Field(default_factory=list)
     tree: list[dict] = Field(default_factory=list)
+    page_patches: list[dict] = Field(default_factory=list)
+    tree_patches: list[dict] = Field(default_factory=list)
+    ref_remaps: list[dict] = Field(default_factory=list)
 
 
 class PipelineOptionsRequest(BaseModel):
