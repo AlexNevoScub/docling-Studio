@@ -102,6 +102,7 @@
         @preview-page-element="onPreviewPageElement"
         @clear-page-element-preview="clearPageElementPreview"
         @save-page-element="onSavePageElement"
+        @apply-document-edit-commands="onApplyDocumentEditCommands"
         @commit-document-edits="onCommitDocumentEdits"
         @discard-document-edits="onDiscardDocumentEdits"
         @save-chunk="onSaveChunk"
@@ -123,7 +124,7 @@
  *   - Clicking a bbox → select the matching node in the tree
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import type { DocChunk, DocTreeNode, ElementType, PageElement } from '../shared/types'
+import type { DocChunk, DocTreeNode, DocumentEditCommandInput, ElementType, PageElement } from '../shared/types'
 import { useAnalysisStore } from '../features/analysis/store'
 import { useChunksStore } from '../features/chunks/store'
 import { fetchDocumentTree } from '../features/document/api'
@@ -281,6 +282,11 @@ async function onSavePageElement(
   payload: { content?: string; bbox?: [number, number, number, number]; type?: ElementType },
 ): Promise<void> {
   await documentStore.updatePageElement(props.docId, targetRef, payload)
+  clearPageElementPreview()
+}
+
+async function onApplyDocumentEditCommands(commands: DocumentEditCommandInput[]): Promise<void> {
+  await documentStore.applyDocumentEditCommands(props.docId, commands)
   clearPageElementPreview()
 }
 

@@ -93,6 +93,62 @@
         </div>
       </section>
 
+      <section v-if="pageElementTargetRef" class="props-section">
+        <h3 class="props-section-title">{{ t('properties.structureEdits') }}</h3>
+        <div class="props-edit" data-e2e="properties-structure-edit">
+          <label class="props-field">
+            <span class="props-field-label">{{ t('properties.insertAfter') }}</span>
+            <textarea
+              v-model="insertAfterContent"
+              class="props-edit-textarea"
+              rows="3"
+              :disabled="documentSaving"
+            />
+          </label>
+          <div class="props-edit-actions">
+            <button
+              class="props-btn props-btn--primary"
+              :disabled="documentSaving || !insertAfterContent.trim()"
+              data-e2e="properties-insert-after-btn"
+              @click="insertAfter"
+            >
+              {{ documentSaving ? t('properties.saving') : t('properties.insertAfterAction') }}
+            </button>
+          </div>
+
+          <label class="props-field">
+            <span class="props-field-label">{{ t('properties.splitAt') }}</span>
+            <input
+              v-model.number="splitIndex"
+              class="props-input mono"
+              type="number"
+              min="1"
+              step="1"
+              :max="maxSplitIndex"
+              :disabled="documentSaving || maxSplitIndex < 1"
+            />
+          </label>
+          <div class="props-edit-actions">
+            <button
+              class="props-btn props-btn--primary"
+              :disabled="documentSaving || !canSplitElement"
+              data-e2e="properties-split-item-btn"
+              @click="splitItem"
+            >
+              {{ documentSaving ? t('properties.saving') : t('properties.splitItem') }}
+            </button>
+            <button
+              class="props-btn props-btn--danger"
+              :disabled="documentSaving"
+              data-e2e="properties-delete-item-btn"
+              @click="deleteItem"
+            >
+              {{ documentSaving ? t('properties.saving') : t('properties.deleteItem') }}
+            </button>
+          </div>
+        </div>
+      </section>
+
       <section v-if="hasPendingDocumentEdits" class="props-section">
         <h3 class="props-section-title">{{ t('properties.pendingDocumentEdits') }}</h3>
         <div class="props-edit-actions">
@@ -179,8 +235,13 @@
  * issue can extend the domain + DTO when the data becomes available.
  */
 import { computed, nextTick, ref, watch } from 'vue'
-import type { DocChunk, ElementType, PageElement } from '../../../shared/types'
+import type { DocChunk, DocumentEditCommandInput, ElementType, PageElement } from '../../../shared/types'
 import { useI18n } from '../../../shared/i18n'
+import {
+  buildDeleteItemCommand,
+  buildInsertItemAfterCommand,
+  buildSplitItemCommand,
+} from '../structuralCommands'
 import { bboxToPercent } from '../bboxPercent'
 import { colorFor } from '../elementColors'
 
@@ -207,6 +268,7 @@ const emit = defineEmits<{
     targetRef: string,
     payload: { content?: string; bbox?: [number, number, number, number]; type?: ElementType },
   ]
+  applyDocumentEditCommands: [commands: DocumentEditCommandInput[]]
   commitDocumentEdits: []
   discardDocumentEdits: []
 }>()
@@ -219,8 +281,14 @@ const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const draftContent = ref('')
 const draftType = ref<ElementType>('text')
 const draftBbox = ref<[number, number, number, number]>([0, 0, 0, 0])
+const insertAfterContent = ref('')
+const splitIndex = ref(1)
 
 const pageElementTargetRef = computed(() => props.element?.draftRef ?? props.element?.self_ref ?? null)
+const maxSplitIndex = computed(() => Math.max(0, draftContent.value.length - 1))
+const canSplitElement = computed(
+  () => Boolean(pageElementTargetRef.value) && splitIndex.value > 0 && splitIndex.value <= maxSplitIndex.value,
+)
 
 const typeOptions: ElementType[] = [
   'text',
@@ -263,6 +331,8 @@ function resetPageElementDraft(): void {
   draftContent.value = props.element.content
   draftType.value = props.element.type as ElementType
   draftBbox.value = [...props.element.bbox] as [number, number, number, number]
+  insertAfterContent.value = ''
+  splitIndex.value = Math.min(1, Math.max(1, props.element.content.length - 1))
 }
 
 function save(): void {
@@ -288,6 +358,24 @@ function savePageElement(): void {
   const payload = currentPageElementPayload()
   if (Object.keys(payload).length === 0) return
   emit('savePageElement', pageElementTargetRef.value, payload)
+}
+
+function insertAfter(): void {
+  if (!pageElementTargetRef.value) return
+  const content = insertAfterContent.value.trim()
+  if (!content) return
+  emit('applyDocumentEditCommands', [buildInsertItemAfterCommand(pageElementTargetRef.value, content)])
+  insertAfterContent.value = ''
+}
+
+function splitItem(): void {
+  if (!pageElementTargetRef.value || !canSplitElement.value) return
+  emit('applyDocumentEditCommands', [buildSplitItemCommand(pageElementTargetRef.value, splitIndex.value)])
+}
+
+function deleteItem(): void {
+  if (!pageElementTargetRef.value) return
+  emit('applyDocumentEditCommands', [buildDeleteItemCommand(pageElementTargetRef.value)])
 }
 
 function currentPageElementPayload(): {
@@ -542,6 +630,15 @@ watch(
 
 .props-btn--primary:hover:not(:disabled) {
   filter: brightness(1.1);
+}
+
+.props-btn--danger {
+  border-color: #c43d3d;
+  color: #c43d3d;
+}
+
+.props-btn--danger:hover:not(:disabled) {
+  background: rgba(196, 61, 61, 0.08);
 }
 
 .props-edit-btn {
