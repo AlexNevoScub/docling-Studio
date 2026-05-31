@@ -23,6 +23,14 @@ export function adjacentGroupSiblingRefs(
   }
 }
 
+export function parentGroupTargetRef(
+  tree: readonly DocTreeNode[],
+  selectedRef: string | null,
+): string | null {
+  if (!selectedRef) return null
+  return findParentGroupTargetRef(tree, selectedRef, [])
+}
+
 function findAdjacentSiblingRefs(
   nodes: readonly DocTreeNode[],
   selectedRef: string,
@@ -49,6 +57,23 @@ function findAdjacentSiblingNodes(
 
   for (const node of nodes) {
     const nested = findAdjacentSiblingNodes(node.children, selectedRef)
+    if (nested) return nested
+  }
+
+  return null
+}
+
+function findParentGroupTargetRef(
+  nodes: readonly DocTreeNode[],
+  selectedRef: string,
+  groupAncestors: readonly DocTreeNode[],
+): string | null {
+  for (const node of nodes) {
+    const nextAncestors = node.type === 'group' ? [...groupAncestors, node] : groupAncestors
+    if (nodeTargetRef(node) === selectedRef) {
+      return nextAncestors.length >= 2 ? nodeTargetRef(nextAncestors[nextAncestors.length - 2]) : null
+    }
+    const nested = findParentGroupTargetRef(node.children, selectedRef, nextAncestors)
     if (nested) return nested
   }
 

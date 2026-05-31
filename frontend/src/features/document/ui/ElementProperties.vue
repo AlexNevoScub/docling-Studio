@@ -178,6 +178,14 @@
               {{ t('properties.moveIntoNextGroup') }}
             </button>
             <button
+              class="props-btn"
+              :disabled="documentSaving || !parentGroupTargetRef"
+              data-e2e="properties-move-to-parent-group-btn"
+              @click="moveToParentGroup"
+            >
+              {{ t('properties.moveToParentGroup') }}
+            </button>
+            <button
               class="props-btn props-btn--danger"
               :disabled="documentSaving"
               data-e2e="properties-delete-item-btn"
@@ -303,6 +311,7 @@ const props = defineProps<{
   nextSiblingTargetRef?: string | null
   previousGroupTargetRef?: string | null
   nextGroupTargetRef?: string | null
+  parentGroupTargetRef?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -453,6 +462,13 @@ function moveIntoNextGroup(): void {
   if (!pageElementTargetRef.value || !props.nextGroupTargetRef) return
   emit('applyDocumentEditCommands', [
     buildReparentItemCommand(pageElementTargetRef.value, props.nextGroupTargetRef),
+  ])
+}
+
+function moveToParentGroup(): void {
+  if (!pageElementTargetRef.value || !props.parentGroupTargetRef) return
+  emit('applyDocumentEditCommands', [
+    buildReparentItemCommand(pageElementTargetRef.value, props.parentGroupTargetRef),
   ])
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DocTreeNode } from '../../shared/types'
-import { adjacentGroupSiblingRefs, adjacentSiblingRefs } from './siblingTargets'
+import { adjacentGroupSiblingRefs, adjacentSiblingRefs, parentGroupTargetRef } from './siblingTargets'
 
 describe('siblingTargets', () => {
   it('finds adjacent root siblings', () => {
@@ -51,6 +51,22 @@ describe('siblingTargets', () => {
       previousGroupRef: 'draft-group-0',
       nextGroupRef: 'draft-group-1',
     })
+  })
+
+  it('finds the parent group target for moving a nested child out one level', () => {
+    const tree = [
+      mkNode('#/groups/0', 'draft-group-0', [
+        mkNode('#/groups/1', 'draft-group-1', [mkNode('#/texts/12', 'draft-2')], 'group'),
+      ], 'group'),
+    ]
+
+    expect(parentGroupTargetRef(tree, 'draft-2')).toBe('draft-group-0')
+  })
+
+  it('returns null parent group target when no outer group exists', () => {
+    const tree = [mkNode('#/groups/0', 'draft-group-0', [mkNode('#/texts/12', 'draft-2')], 'group')]
+
+    expect(parentGroupTargetRef(tree, 'draft-2')).toBeNull()
   })
 })
 
