@@ -735,9 +735,45 @@ class DocumentEditService:
         previous_tree: list[dict[str, Any]],
         next_tree: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        if previous_tree == next_tree:
-            return []
-        return [{"op": "replace", "path": [], "nodes": next_tree}]
+        patches: list[dict[str, Any]] = []
+        self._append_tree_patches(previous_tree, next_tree, path=[], patches=patches)
+        return patches
+
+    def _append_tree_patches(
+        self,
+        previous_nodes: list[dict[str, Any]],
+        next_nodes: list[dict[str, Any]],
+        *,
+        path: list[str],
+        patches: list[dict[str, Any]],
+    ) -> None:
+        if previous_nodes == next_nodes:
+            return
+        if len(previous_nodes) != len(next_nodes):
+            patches.append({"op": "replace", "path": path, "nodes": next_nodes})
+            return
+
+        previous_signatures = [self._tree_node_signature(node) for node in previous_nodes]
+        next_signatures = [self._tree_node_signature(node) for node in next_nodes]
+        if previous_signatures != next_signatures:
+            patches.append({"op": "replace", "path": path, "nodes": next_nodes})
+            return
+
+        for previous_node, next_node in zip(previous_nodes, next_nodes, strict=False):
+            self._append_tree_patches(
+                previous_node.get("children", []),
+                next_node.get("children", []),
+                path=[*path, str(next_node.get("ref") or "")],
+                patches=patches,
+            )
+
+    def _tree_node_signature(self, node: dict[str, Any]) -> tuple[str, str, str, str]:
+        return (
+            str(node.get("ref") or ""),
+            str(node.get("draftRef") or ""),
+            str(node.get("type") or ""),
+            str(node.get("label") or ""),
+        )
 
     async def _ensure_bindings(
         self,

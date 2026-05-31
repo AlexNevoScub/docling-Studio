@@ -441,11 +441,39 @@ function applyPagePatches(previousPages: Page[], patches: DocumentPagePatch[]): 
 function applyTreePatches(previousTree: DocTreeNode[], patches: DocumentTreePatch[]): DocTreeNode[] {
   let nextTree = cloneTree(previousTree) ?? []
   for (const patch of patches) {
-    if (patch.op === 'replace' && patch.path.length === 0) {
-      nextTree = cloneTree(patch.nodes) ?? []
-    }
+    if (patch.op !== 'replace') continue
+    nextTree = replaceTreeNodesAtPath(nextTree, patch.path, patch.nodes)
   }
   return nextTree
+}
+
+function replaceTreeNodesAtPath(
+  previousTree: DocTreeNode[],
+  path: string[],
+  nodes: DocTreeNode[],
+): DocTreeNode[] {
+  if (path.length === 0) return cloneTree(nodes) ?? []
+  return previousTree.map((node) => replaceTreeNodeChildren(node, path, nodes))
+}
+
+function replaceTreeNodeChildren(
+  node: DocTreeNode,
+  path: string[],
+  nodes: DocTreeNode[],
+): DocTreeNode {
+  const cloned: DocTreeNode = {
+    ...node,
+    children: cloneTree(node.children) ?? [],
+  }
+  if (cloned.ref !== path[0]) return cloned
+  if (path.length === 1) {
+    cloned.children = cloneTree(nodes) ?? []
+    return cloned
+  }
+  cloned.children = cloned.children.map((child) =>
+    replaceTreeNodeChildren(child, path.slice(1), nodes),
+  )
+  return cloned
 }
 
 function clonePage(page: Page): Page {

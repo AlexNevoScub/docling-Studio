@@ -571,4 +571,51 @@ describe('useDocumentStore', () => {
     expect(store.workspaceDraftPages?.[0].elements[0].content).toBe('Backend truth')
     expect(store.workspaceDraftTree).toEqual([mkTreeNode({ label: 'Backend patched tree' })])
   })
+
+  it('updatePageElement() applies nested tree patches without replacing the root tree', async () => {
+    const store = useDocumentStore()
+    store.workspaceActiveAnalysis = mkAnalysis({
+      pagesJson:
+        '[{"page_number":1,"width":600,"height":800,"elements":[{"self_ref":"#/texts/12","draftRef":"draft-1","type":"title","content":"Old","bbox":[0,0,10,10],"level":0}]}]',
+    })
+    store.workspaceDraftTree = [
+      mkTreeNode({
+        ref: '#/groups/0',
+        type: 'group',
+        label: 'Group',
+        children: [mkTreeNode({ ref: '#/texts/12', label: 'Old child' })],
+      }),
+      mkTreeNode({ ref: '#/texts/99', label: 'Sibling root' }),
+    ]
+    store.documentEditSessionId = 'sess-1'
+    store.documentEditDraftVersion = 0
+
+    api.applyDocumentEditCommands.mockResolvedValue(
+      mkEditSession({
+        draftVersion: 1,
+        pages: [],
+        tree: [],
+        pagePatches: [],
+        treePatches: [
+          {
+            op: 'replace',
+            path: ['#/groups/0'],
+            nodes: [mkTreeNode({ ref: '#/texts/12', label: 'Patched child' })],
+          },
+        ],
+      }),
+    )
+
+    await store.updatePageElement('d1', 'draft-1', { content: 'Optimistic' })
+
+    expect(store.workspaceDraftTree).toEqual([
+      mkTreeNode({
+        ref: '#/groups/0',
+        type: 'group',
+        label: 'Group',
+        children: [mkTreeNode({ ref: '#/texts/12', label: 'Patched child' })],
+      }),
+      mkTreeNode({ ref: '#/texts/99', label: 'Sibling root' }),
+    ])
+  })
 })

@@ -295,6 +295,60 @@ class TestDocumentEditService:
         assert second_ref == first_ref
         assert _tree_draft_ref_by_ref(first["tree"], "#/texts/12") == first_ref
 
+    async def test_build_tree_patches_replaces_only_changed_nested_sibling_list(self, service):
+        previous_tree = [
+            {
+                "ref": "#/groups/0",
+                "draftRef": "draft-group",
+                "type": "group",
+                "label": "Group",
+                "children": [
+                    {
+                        "ref": "#/texts/1",
+                        "draftRef": "draft-1",
+                        "type": "text",
+                        "label": "One",
+                        "children": [],
+                    },
+                    {
+                        "ref": "#/texts/2",
+                        "draftRef": "draft-2",
+                        "type": "text",
+                        "label": "Two",
+                        "children": [],
+                    },
+                ],
+            }
+        ]
+        next_tree = [
+            {
+                "ref": "#/groups/0",
+                "draftRef": "draft-group",
+                "type": "group",
+                "label": "Group",
+                "children": [
+                    {
+                        "ref": "#/texts/1",
+                        "draftRef": "draft-1",
+                        "type": "text",
+                        "label": "One updated",
+                        "children": [],
+                    },
+                    {
+                        "ref": "#/texts/2",
+                        "draftRef": "draft-2",
+                        "type": "text",
+                        "label": "Two",
+                        "children": [],
+                    },
+                ],
+            }
+        ]
+
+        assert service._build_tree_patches(previous_tree, next_tree) == [
+            {"op": "replace", "path": ["#/groups/0"], "nodes": next_tree[0]["children"]}
+        ]
+
     async def test_delete_item_removes_text_sibling_in_preview_and_commit(
         self, service, repos, doc, analysis
     ):
