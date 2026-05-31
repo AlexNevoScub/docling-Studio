@@ -5,6 +5,7 @@ import {
   buildMergeItemsCommand,
   buildMoveItemAfterCommand,
   buildMoveItemBeforeCommand,
+  buildReparentItemCommand,
   buildSplitItemCommand,
 } from './structuralCommands'
 
@@ -54,6 +55,14 @@ describe('structuralCommands', () => {
       action: 'merge_items',
       targetRef: 'draft-1',
       payload: { trailingTargetRef: 'draft-2', separator: ' ' },
+    })
+  })
+
+  it('builds a reparent_item command', () => {
+    expect(buildReparentItemCommand('draft-1', 'draft-group')).toEqual({
+      action: 'reparent_item',
+      targetRef: 'draft-1',
+      payload: { parentTargetRef: 'draft-group' },
     })
   })
 })

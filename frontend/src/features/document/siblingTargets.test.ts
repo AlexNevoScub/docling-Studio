@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DocTreeNode } from '../../shared/types'
-import { adjacentSiblingRefs } from './siblingTargets'
+import { adjacentGroupSiblingRefs, adjacentSiblingRefs } from './siblingTargets'
 
 describe('siblingTargets', () => {
   it('finds adjacent root siblings', () => {
@@ -39,13 +39,26 @@ describe('siblingTargets', () => {
       nextSiblingRef: null,
     })
   })
+
+  it('finds adjacent group siblings for reparent targets', () => {
+    const tree = [
+      mkNode('#/groups/0', 'draft-group-0', [], 'group'),
+      mkNode('#/texts/12', 'draft-2'),
+      mkNode('#/groups/1', 'draft-group-1', [], 'group'),
+    ]
+
+    expect(adjacentGroupSiblingRefs(tree, 'draft-2')).toEqual({
+      previousGroupRef: 'draft-group-0',
+      nextGroupRef: 'draft-group-1',
+    })
+  })
 })
 
-function mkNode(ref: string, draftRef?: string, children: DocTreeNode[] = []): DocTreeNode {
+function mkNode(ref: string, draftRef?: string, children: DocTreeNode[] = [], type = 'text'): DocTreeNode {
   return {
     ref,
     draftRef,
-    type: 'text',
+    type,
     label: ref,
     children,
   }

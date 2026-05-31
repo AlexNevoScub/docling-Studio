@@ -62,3 +62,14 @@ export function buildMergeItemsCommand(
     payload: { trailingTargetRef, separator: ' ' },
   }
 }
+
+export function buildReparentItemCommand(
+  targetRef: string,
+  parentTargetRef: string,
+): DocumentEditCommandInput {
+  return {
+    action: 'reparent_item',
+    targetRef,
+    payload: { parentTargetRef },
+  }
+}

@@ -162,6 +162,22 @@
               {{ t('properties.mergeNext') }}
             </button>
             <button
+              class="props-btn"
+              :disabled="documentSaving || !previousGroupTargetRef"
+              data-e2e="properties-move-into-previous-group-btn"
+              @click="moveIntoPreviousGroup"
+            >
+              {{ t('properties.moveIntoPreviousGroup') }}
+            </button>
+            <button
+              class="props-btn"
+              :disabled="documentSaving || !nextGroupTargetRef"
+              data-e2e="properties-move-into-next-group-btn"
+              @click="moveIntoNextGroup"
+            >
+              {{ t('properties.moveIntoNextGroup') }}
+            </button>
+            <button
               class="props-btn props-btn--danger"
               :disabled="documentSaving"
               data-e2e="properties-delete-item-btn"
@@ -267,6 +283,7 @@ import {
   buildMergeItemsCommand,
   buildMoveItemAfterCommand,
   buildMoveItemBeforeCommand,
+  buildReparentItemCommand,
   buildSplitItemCommand,
 } from '../structuralCommands'
 import { bboxToPercent } from '../bboxPercent'
@@ -284,6 +301,8 @@ const props = defineProps<{
   hasPendingDocumentEdits?: boolean
   previousSiblingTargetRef?: string | null
   nextSiblingTargetRef?: string | null
+  previousGroupTargetRef?: string | null
+  nextGroupTargetRef?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -420,6 +439,20 @@ function mergeWithNext(): void {
   if (!pageElementTargetRef.value || !props.nextSiblingTargetRef) return
   emit('applyDocumentEditCommands', [
     buildMergeItemsCommand(pageElementTargetRef.value, props.nextSiblingTargetRef),
+  ])
+}
+
+function moveIntoPreviousGroup(): void {
+  if (!pageElementTargetRef.value || !props.previousGroupTargetRef) return
+  emit('applyDocumentEditCommands', [
+    buildReparentItemCommand(pageElementTargetRef.value, props.previousGroupTargetRef),
+  ])
+}
+
+function moveIntoNextGroup(): void {
+  if (!pageElementTargetRef.value || !props.nextGroupTargetRef) return
+  emit('applyDocumentEditCommands', [
+    buildReparentItemCommand(pageElementTargetRef.value, props.nextGroupTargetRef),
   ])
 }
 

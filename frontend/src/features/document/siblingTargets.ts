@@ -11,20 +11,44 @@ export function adjacentSiblingRefs(
   }
 }
 
+export function adjacentGroupSiblingRefs(
+  tree: readonly DocTreeNode[],
+  selectedRef: string | null,
+): { previousGroupRef: string | null; nextGroupRef: string | null } {
+  if (!selectedRef) return { previousGroupRef: null, nextGroupRef: null }
+  const siblings = findAdjacentSiblingNodes(tree, selectedRef)
+  return {
+    previousGroupRef: siblings?.previousSibling?.type === 'group' ? nodeTargetRef(siblings.previousSibling) : null,
+    nextGroupRef: siblings?.nextSibling?.type === 'group' ? nodeTargetRef(siblings.nextSibling) : null,
+  }
+}
+
 function findAdjacentSiblingRefs(
   nodes: readonly DocTreeNode[],
   selectedRef: string,
 ): { previousSiblingRef: string | null; nextSiblingRef: string | null } | null {
+  const siblings = findAdjacentSiblingNodes(nodes, selectedRef)
+  if (!siblings) return null
+  return {
+    previousSiblingRef: siblings.previousSibling ? nodeTargetRef(siblings.previousSibling) : null,
+    nextSiblingRef: siblings.nextSibling ? nodeTargetRef(siblings.nextSibling) : null,
+  }
+}
+
+function findAdjacentSiblingNodes(
+  nodes: readonly DocTreeNode[],
+  selectedRef: string,
+): { previousSibling: DocTreeNode | null; nextSibling: DocTreeNode | null } | null {
   const index = nodes.findIndex((node) => nodeTargetRef(node) === selectedRef)
   if (index >= 0) {
     return {
-      previousSiblingRef: index > 0 ? nodeTargetRef(nodes[index - 1]) : null,
-      nextSiblingRef: index < nodes.length - 1 ? nodeTargetRef(nodes[index + 1]) : null,
+      previousSibling: index > 0 ? nodes[index - 1] : null,
+      nextSibling: index < nodes.length - 1 ? nodes[index + 1] : null,
     }
   }
 
   for (const node of nodes) {
-    const nested = findAdjacentSiblingRefs(node.children, selectedRef)
+    const nested = findAdjacentSiblingNodes(node.children, selectedRef)
     if (nested) return nested
   }
 
