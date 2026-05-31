@@ -277,6 +277,9 @@ class DocumentEditService:
             if edit.action is DocumentEditAction.UPDATE_PAGE_ELEMENT:
                 self._apply_update_page_element(document, edit, bindings)
                 continue
+            if edit.action is DocumentEditAction.INSERT_ITEM:
+                document = self._apply_insert_item(document, edit, bindings)
+                continue
             if edit.action is DocumentEditAction.DELETE_ITEM:
                 document = self._apply_delete_item(document, edit, bindings)
                 continue
@@ -374,6 +377,18 @@ class DocumentEditService:
                 raise DocumentEditConflictError(
                     "move_item_after payload.afterTargetRef is required"
                 )
+            return
+
+        if action is DocumentEditAction.INSERT_ITEM:
+            allowed = {"content"}
+            unknown = sorted(set(payload) - allowed)
+            if unknown:
+                raise DocumentEditConflictError(
+                    f"Unsupported insert_item payload fields: {', '.join(unknown)}"
+                )
+            content = payload.get("content")
+            if not isinstance(content, str):
+                raise DocumentEditConflictError("insert_item payload.content is required")
             return
 
         if action is DocumentEditAction.DELETE_ITEM:
@@ -476,6 +491,16 @@ class DocumentEditService:
         if target_ref == after_target_ref:
             raise DocumentEditConflictError("move_item_after targetRef cannot equal afterTargetRef")
         return self._reorder_item_after(document, target_ref, after_target_ref)
+
+    def _apply_insert_item(
+        self,
+        document: DoclingDocument,
+        edit: DocumentEdit,
+        bindings: dict[str, DraftNodeBinding],
+    ) -> DoclingDocument:
+        target_ref = self._resolve_self_ref(edit.target_ref, bindings)
+        content = str(edit.payload.get("content") or "")
+        return self._insert_item(document, target_ref, content=content)
 
     def _apply_delete_item(
         self,
@@ -810,6 +835,52 @@ class DocumentEditService:
         child_index = self._child_index(children, target_ref)
         children.pop(child_index)
         self._remove_text_item_from_document_dict(document_dict, target_ref)
+        return DoclingDocument.model_validate(document_dict)
+
+    def _insert_item(
+        self,
+        document: DoclingDocument,
+        target_ref: str,
+        *,
+        content: str,
+    ) -> DoclingDocument:
+        target_item = self._find_item(document, target_ref)
+        if not isinstance(target_item, TextItem):
+            raise DocumentEditConflictError("insert_item currently supports text items only")
+
+        document_dict = document.export_to_dict()
+        nodes_by_ref = self._index_document_nodes(document_dict)
+        target_node = nodes_by_ref.get(target_ref)
+        if target_node is None:
+            raise DocumentEditNotFoundError(f"Document item not found: {target_ref}")
+
+        parent_ref = self._parent_ref(target_node)
+        if not parent_ref:
+            raise DocumentEditConflictError(f"Target node is missing a parent: {target_ref}")
+        parent_node = nodes_by_ref.get(parent_ref)
+        if parent_node is None:
+            raise DocumentEditConflictError(f"Parent node not found for insert: {parent_ref}")
+        children = parent_node.get("children")
+        if not isinstance(children, list):
+            raise DocumentEditConflictError(
+                f"Parent does not expose insertable children: {parent_ref}"
+            )
+
+        next_self_ref = self._next_text_self_ref(document_dict)
+        inserted_node = copy.deepcopy(target_node)
+        inserted_node["self_ref"] = next_self_ref
+        inserted_node["text"] = content
+        if "orig" in inserted_node:
+            inserted_node["orig"] = content
+        inserted_node["parent"] = {"$ref": parent_ref}
+
+        texts = document_dict.get("texts")
+        if not isinstance(texts, list):
+            raise DocumentEditConflictError("Document does not expose a texts array")
+        texts.append(inserted_node)
+
+        child_index = self._child_index(children, target_ref)
+        children.insert(child_index + 1, {"$ref": next_self_ref})
         return DoclingDocument.model_validate(document_dict)
 
     def _reorder_item_before(

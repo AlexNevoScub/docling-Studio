@@ -355,6 +355,66 @@ class TestDocumentEditService:
 
         assert "currently supports text items only" in str(exc.value)
 
+    async def test_insert_item_creates_following_text_sibling_in_preview_and_commit(
+        self, service, repos, doc, analysis
+    ):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _draft_ref_by_self_ref(initial_session["pages"], "#/texts/11")
+        inserted_content = "Inserted sibling"
+
+        session = await service.apply_commands(
+            doc.id,
+            session_id=initial_session["sessionId"],
+            draft_version=initial_session["draftVersion"],
+            commands=[
+                {
+                    "action": "insert_item",
+                    "targetRef": target_ref,
+                    "payload": {"content": inserted_content},
+                }
+            ],
+        )
+
+        new_ref = _next_tree_ref_after(session["tree"], "#/texts/11")
+        assert new_ref.startswith("#/texts/")
+        assert _element_by_ref(session["pages"], new_ref)["content"] == inserted_content
+
+        commit_result = await service.commit(
+            doc.id,
+            session_id=session["sessionId"],
+            draft_version=session["draftVersion"],
+        )
+
+        assert commit_result["committed"] is True
+        assert _element_by_ref(commit_result["pages"], new_ref)["content"] == inserted_content
+
+        persisted = await repos["analyses"].find_latest_completed_by_document(doc.id)
+        assert persisted is not None
+        persisted_doc = json.loads(persisted.document_json or "{}")
+        assert _text_item_by_ref(persisted_doc, new_ref)["text"] == inserted_content
+        body_children = _child_ref_order(persisted_doc["body"].get("children", []))
+        assert body_children.index(new_ref) == body_children.index("#/texts/11") + 1
+
+    async def test_rejects_insert_item_for_group_node(self, service, doc, analysis):
+        initial_session = await service.get_session(doc.id)
+        target_ref = _tree_draft_ref_by_ref(initial_session["tree"], "#/groups/0")
+
+        with pytest.raises(DocumentEditConflictError) as exc:
+            await service.apply_commands(
+                doc.id,
+                session_id=initial_session["sessionId"],
+                draft_version=initial_session["draftVersion"],
+                commands=[
+                    {
+                        "action": "insert_item",
+                        "targetRef": target_ref,
+                        "payload": {"content": "Inserted sibling"},
+                    }
+                ],
+            )
+
+        assert "currently supports text items only" in str(exc.value)
+
     async def test_merge_items_merges_adjacent_text_siblings_and_commits(
         self, service, repos, doc, analysis
     ):
