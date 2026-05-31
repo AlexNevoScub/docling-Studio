@@ -21,6 +21,23 @@ describe('structuralSelection', () => {
     expect(postCommandSelectionRef(commands, tree)).toBe('draft-new')
   })
 
+  it('keeps selection on the surviving node after merge_items', () => {
+    const commands: DocumentEditCommandInput[] = [
+      { action: 'merge_items', targetRef: 'draft-1', payload: { trailingTargetRef: 'draft-2', separator: ' ' } },
+    ]
+    const tree = [mkNode('#/texts/11', 'draft-1')]
+
+    expect(postCommandSelectionRef(commands, tree)).toBe('draft-1')
+  })
+
+  it('clears merge selection intent when the surviving target is missing', () => {
+    const commands: DocumentEditCommandInput[] = [
+      { action: 'merge_items', targetRef: 'draft-1', payload: { trailingTargetRef: 'draft-2', separator: ' ' } },
+    ]
+
+    expect(postCommandSelectionRef(commands, [])).toBeNull()
+  })
+
   it('returns null for commands without selection intent', () => {
     const commands: DocumentEditCommandInput[] = [
       { action: 'move_item_after', targetRef: 'draft-1', payload: { afterTargetRef: 'draft-2' } },
