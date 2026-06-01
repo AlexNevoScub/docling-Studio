@@ -245,7 +245,7 @@
             </button>
             <button
               class="props-btn props-btn--primary"
-              :disabled="saving || draftText === linkedChunk.text"
+              :disabled="!chunkState.canSave"
               data-e2e="properties-save-btn"
               @click="save"
             >
@@ -286,6 +286,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import type { DocChunk, DocumentEditCommandInput, ElementType, PageElement } from '../../../shared/types'
 import { useI18n } from '../../../shared/i18n'
 import { bboxToPercent } from '../bboxPercent'
+import { chunkDraftFromChunk, chunkPanelState } from '../chunkPanel'
 import { colorFor } from '../elementColors'
 import { pageElementDraftFromElement, pageElementPanelState } from '../pageElementPanel'
 import { structuralPanelCommand, structuralPanelState } from '../structuralPanel'
@@ -334,6 +335,7 @@ const draftBbox = ref<[number, number, number, number]>([0, 0, 0, 0])
 const insertAfterContent = ref('')
 const splitIndex = ref(1)
 
+const chunkState = computed(() => chunkPanelState(props.linkedChunk, draftText.value, Boolean(props.saving)))
 const pageElementTargetRef = computed(() => props.element?.draftRef ?? props.element?.self_ref ?? null)
 const pageElementState = computed(() =>
   pageElementPanelState({
