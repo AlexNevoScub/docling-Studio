@@ -83,7 +83,7 @@
             </button>
             <button
               class="props-btn props-btn--primary"
-              :disabled="documentSaving || !pageElementTargetRef || !hasPageElementChanges"
+              :disabled="!pageElementState.canSave"
               data-e2e="properties-save-page-element-btn"
               @click="savePageElement"
             >
@@ -287,6 +287,7 @@ import type { DocChunk, DocumentEditCommandInput, ElementType, PageElement } fro
 import { useI18n } from '../../../shared/i18n'
 import { bboxToPercent } from '../bboxPercent'
 import { colorFor } from '../elementColors'
+import { pageElementDraftFromElement, pageElementPanelState } from '../pageElementPanel'
 import { structuralPanelCommand, structuralPanelState } from '../structuralPanel'
 
 const props = defineProps<{
@@ -334,6 +335,16 @@ const insertAfterContent = ref('')
 const splitIndex = ref(1)
 
 const pageElementTargetRef = computed(() => props.element?.draftRef ?? props.element?.self_ref ?? null)
+const pageElementState = computed(() =>
+  pageElementPanelState({
+    element: props.element,
+    targetRef: pageElementTargetRef.value,
+    draftContent: draftContent.value,
+    draftType: draftType.value,
+    draftBbox: draftBbox.value,
+    documentSaving: Boolean(props.documentSaving),
+  }),
+)
 const structuralState = computed(() =>
   structuralPanelState({
     targetRef: pageElementTargetRef.value,
