@@ -135,6 +135,14 @@ import { useChunksStore } from '../features/chunks/store'
 import { fetchDocumentTree } from '../features/document/api'
 import { reconcileSelectedDraftRef, resolveSelectedSelfRef } from '../features/document/editSelection'
 import {
+  applyPageElementPreview,
+  countTreeNodes,
+  elementTargetRef,
+  filterTreeNodes,
+  findElementByRef,
+  findPageNumberForRef,
+} from '../features/document/parseTabState'
+import {
   adjacentGroupSiblingRefs,
   adjacentSiblingRefs,
   parentGroupTargetRef,
@@ -187,23 +195,9 @@ const transientPageElementPreview = ref<{
   payload: { content?: string; bbox?: [number, number, number, number]; type?: ElementType }
 } | null>(null)
 const effectiveTree = computed<DocTreeNode[]>(() => documentStore.workspaceDraftTree ?? tree.value)
-const displayedPages = computed(() => {
-  const preview = transientPageElementPreview.value
-  if (!preview) return documentStore.workspacePages
-  return documentStore.workspacePages.map((page) => ({
-    ...page,
-    elements: page.elements.map((element) =>
-      elementDraftRef(element) === preview.targetRef
-        ? {
-            ...element,
-            content: preview.payload.content ?? element.content,
-            bbox: preview.payload.bbox ?? element.bbox,
-            type: preview.payload.type ?? element.type,
-          }
-        : element,
-    ),
-  }))
-})
+const displayedPages = computed(() =>
+  applyPageElementPreview(documentStore.workspacePages, transientPageElementPreview.value),
+)
 
 const currentPageData = computed(() => {
   return displayedPages.value.find((p) => p.page_number === currentPage.value) ?? null
@@ -213,25 +207,16 @@ const currentPageElements = computed<PageElement[]>(() => currentPageData.value?
 const currentPageWidth = computed(() => currentPageData.value?.width ?? 0)
 const currentPageHeight = computed(() => currentPageData.value?.height ?? 0)
 
-const selectedElement = computed<PageElement | null>(() => {
-  if (!selectedNodeRef.value) return null
-  // Search every page — selectedNodeRef may point to an element on a
-  // different page than the one currently rendered (the click also
-  // triggers a page change, but until that lands the panel still wants
-  // to show the element's data).
-  for (const page of documentStore.workspacePages) {
-    const el = page.elements.find((e) => elementDraftRef(e) === selectedNodeRef.value)
-    if (el) return el
-  }
-  return null
-})
+const selectedElement = computed<PageElement | null>(() =>
+  findElementByRef(documentStore.workspacePages, selectedNodeRef.value),
+)
 
 const linkedChunk = computed<DocChunk | null>(() => {
   if (!selectedElement.value) return null
   return chunkForElement(selectedElement.value, currentPage.value, chunksStore.chunks)
 })
 
-const nodeCount = computed(() => countNodes(effectiveTree.value))
+const nodeCount = computed(() => countTreeNodes(effectiveTree.value))
 const selectedSiblingRefs = computed(() => adjacentSiblingRefs(effectiveTree.value, selectedNodeRef.value))
 const selectedGroupSiblingRefs = computed(() => adjacentGroupSiblingRefs(effectiveTree.value, selectedNodeRef.value))
 const selectedParentGroupTargetRef = computed(() => parentGroupTargetRef(effectiveTree.value, selectedNodeRef.value))
@@ -239,7 +224,7 @@ const selectedParentGroupTargetRef = computed(() => parentGroupTargetRef(effecti
 const filteredNodes = computed<DocTreeNode[]>(() => {
   const needle = filter.value.trim().toLowerCase()
   if (!needle) return effectiveTree.value
-  return filterTree(effectiveTree.value, needle)
+  return filterTreeNodes(effectiveTree.value, needle)
 })
 
 const highlightedRefs = computed<ReadonlySet<string>>(() => {
@@ -272,7 +257,7 @@ function clearPageElementPreview(): void {
 
 function onTreeSelect(ref: string): void {
   setSelectedNodeRef(ref)
-  const pageOfRef = findPageOfRef(documentStore.workspacePages, ref)
+  const pageOfRef = findPageNumberForRef(documentStore.workspacePages, ref)
   if (pageOfRef !== null && pageOfRef !== currentPage.value) {
     currentPage.value = pageOfRef
   }
@@ -283,7 +268,7 @@ function onHoverElement(_el: PageElement | null): void {
 }
 
 function onClickElement(el: PageElement): void {
-  const ref = elementDraftRef(el)
+  const ref = elementTargetRef(el)
   if (ref) setSelectedNodeRef(ref)
 }
 
@@ -305,7 +290,7 @@ async function onApplyDocumentEditCommands(commands: DocumentEditCommandInput[])
   const nextSelectedRef = postCommandSelectionRef(commands, previousTree, effectiveTree.value)
   if (nextSelectedRef) {
     setSelectedNodeRef(nextSelectedRef)
-    const pageOfRef = findPageOfRef(documentStore.workspacePages, nextSelectedRef)
+    const pageOfRef = findPageNumberForRef(documentStore.workspacePages, nextSelectedRef)
     if (pageOfRef !== null && pageOfRef !== currentPage.value) {
       currentPage.value = pageOfRef
     }
@@ -374,43 +359,6 @@ watch(
   },
 )
 
-// --- pure helpers ----------------------------------------------------------
-
-function countNodes(nodes: readonly DocTreeNode[]): number {
-  let n = 0
-  for (const node of nodes) {
-    n += 1 + countNodes(node.children)
-  }
-  return n
-}
-
-function filterTree(nodes: readonly DocTreeNode[], needle: string): DocTreeNode[] {
-  const out: DocTreeNode[] = []
-  for (const node of nodes) {
-    const childMatches = filterTree(node.children, needle)
-    const selfMatch =
-      node.label.toLowerCase().includes(needle) || node.type.toLowerCase().includes(needle)
-    if (selfMatch || childMatches.length > 0) {
-      out.push({ ...node, children: childMatches })
-    }
-  }
-  return out
-}
-
-function findPageOfRef(
-  pages: readonly { page_number: number; elements: readonly PageElement[] }[],
-  ref: string,
-): number | null {
-  for (const page of pages) {
-    if (page.elements.some((e) => elementDraftRef(e) === ref)) return page.page_number
-  }
-  return null
-}
-
-function elementDraftRef(element: Pick<PageElement, 'draftRef' | 'self_ref'>): string | null {
-  return element.draftRef ?? element.self_ref ?? null
-}
-
 function setSelectedNodeRef(ref: string | null): void {
   selectedNodeRef.value = ref
   selectedNodeSelfRef.value = resolveSelectedSelfRef(
@@ -446,7 +394,7 @@ function reconcileSelection(): void {
     effectiveTree.value,
     documentStore.workspacePages,
   )
-  const pageOfRef = findPageOfRef(documentStore.workspacePages, nextSelectedRef)
+  const pageOfRef = findPageNumberForRef(documentStore.workspacePages, nextSelectedRef)
   if (pageOfRef !== null && pageOfRef !== currentPage.value) {
     currentPage.value = pageOfRef
   }
