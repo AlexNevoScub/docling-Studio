@@ -147,11 +147,15 @@ import {
   selectionStateFromRef,
 } from '../features/document/parseTabSelection'
 import {
-  docChangeUiState,
+  analysisChangeEventState,
+  applyCommandsEventState,
+  commitDocumentEditsEventState,
+  discardDocumentEditsEventState,
+  docIdChangeEventState,
+  treeSelectEventState,
+} from '../features/document/parseTabEvents'
+import {
   firstWorkspacePageNumber,
-  nextPageAfterSelection,
-  shouldReloadTreeAfterCommit,
-  shouldReloadTreeForAnalysisChange,
 } from '../features/document/parseTabWorkflow'
 import {
   adjacentGroupSiblingRefs,
@@ -267,7 +271,8 @@ function clearPageElementPreview(): void {
 
 function onTreeSelect(ref: string): void {
   setSelectedNodeRef(ref)
-  currentPage.value = nextPageAfterSelection(currentPage.value, currentSelectionState())
+  const eventState = treeSelectEventState(currentPage.value, currentSelectionState())
+  currentPage.value = eventState.currentPageNumber ?? currentPage.value
 }
 
 function onHoverElement(_el: PageElement | null): void {
@@ -303,20 +308,21 @@ async function onApplyDocumentEditCommands(commands: DocumentEditCommandInput[])
   if (nextSelection) {
     applySelectionState(nextSelection)
   }
-  clearPageElementPreview()
+  if (applyCommandsEventState().clearPreview) clearPageElementPreview()
 }
 
 async function onCommitDocumentEdits(): Promise<void> {
   const result = await documentStore.commitPendingDocumentEdits(props.docId)
-  clearPageElementPreview()
-  if (shouldReloadTreeAfterCommit(result)) {
+  const eventState = commitDocumentEditsEventState(result)
+  if (eventState.clearPreview) clearPageElementPreview()
+  if (eventState.reloadTree) {
     await loadTree()
   }
 }
 
 async function onDiscardDocumentEdits(): Promise<void> {
   await documentStore.discardPendingDocumentEdits(props.docId)
-  clearPageElementPreview()
+  if (discardDocumentEditsEventState().clearPreview) clearPageElementPreview()
 }
 
 onMounted(async () => {
@@ -332,10 +338,10 @@ watch(
   () => props.docId,
   async (id) => {
     await Promise.all([documentStore.loadWorkspace(id), chunksStore.load(id), loadTree()])
-    const nextState = docChangeUiState(documentStore.workspacePages, currentPage.value)
-    applySelectionState(nextState.selection)
-    filter.value = nextState.filter
-    currentPage.value = nextState.currentPageNumber
+    const eventState = docIdChangeEventState(documentStore.workspacePages, currentPage.value)
+    if (eventState.clearSelection) clearSelection()
+    if (eventState.clearFilter) filter.value = ''
+    currentPage.value = eventState.currentPageNumber ?? currentPage.value
   },
 )
 
@@ -347,8 +353,11 @@ watch(
 watch(
   () => documentStore.workspaceActiveAnalysis?.id,
   (newId, oldId) => {
-    if (shouldReloadTreeForAnalysisChange(newId, oldId)) {
+    const eventState = analysisChangeEventState(newId, oldId)
+    if (eventState.clearSelection) {
       clearSelection()
+    }
+    if (eventState.reloadTree) {
       loadTree()
     }
   },
