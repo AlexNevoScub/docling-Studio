@@ -286,9 +286,16 @@ import { computed, nextTick, ref, watch } from 'vue'
 import type { DocChunk, DocumentEditCommandInput, ElementType, PageElement } from '../../../shared/types'
 import { useI18n } from '../../../shared/i18n'
 import { bboxToPercent } from '../bboxPercent'
-import { chunkDraftFromChunk, chunkPanelState } from '../chunkPanel'
+import { chunkPanelState } from '../chunkPanel'
+import {
+  chunkDraftTextFromChunk,
+  chunkSaveOutcome,
+  elementPropertiesDraftStateFromElement,
+  pageElementPreviewOutcome,
+  pageElementSaveOutcome,
+} from '../elementPropertiesLogic'
 import { colorFor } from '../elementColors'
-import { pageElementDraftFromElement, pageElementPanelState } from '../pageElementPanel'
+import { pageElementPanelState } from '../pageElementPanel'
 import { structuralPanelCommand, structuralPanelState } from '../structuralPanel'
 
 const props = defineProps<{
@@ -389,7 +396,7 @@ const bboxPct = computed(() => {
 
 function startEdit(): void {
   if (!props.linkedChunk) return
-  draftText.value = props.linkedChunk.text
+  draftText.value = chunkDraftTextFromChunk(props.linkedChunk)
   editing.value = true
   nextTick(() => textareaRef.value?.focus())
 }
@@ -400,37 +407,28 @@ function cancel(): void {
 }
 
 function resetPageElementDraft(): void {
-  if (!props.element) return
-  draftContent.value = props.element.content
-  draftType.value = props.element.type as ElementType
-  draftBbox.value = [...props.element.bbox] as [number, number, number, number]
-  insertAfterContent.value = ''
-  splitIndex.value = Math.min(1, Math.max(1, props.element.content.length - 1))
+  const nextDraftState = elementPropertiesDraftStateFromElement(props.element)
+  draftContent.value = nextDraftState.pageElementDraft.content
+  draftType.value = nextDraftState.pageElementDraft.type
+  draftBbox.value = [...nextDraftState.pageElementDraft.bbox]
+  insertAfterContent.value = nextDraftState.insertAfterContent
+  splitIndex.value = nextDraftState.splitIndex
 }
 
 function save(): void {
-  if (!props.linkedChunk) return
-  if (draftText.value === props.linkedChunk.text) {
+  const outcome = chunkSaveOutcome(props.linkedChunk, draftText.value, chunkState.value)
+  if (outcome.kind === 'close') {
     cancel()
     return
   }
-  emit('saveChunk', props.linkedChunk.id, draftText.value)
+  if (outcome.kind !== 'save') return
+  emit('saveChunk', outcome.chunkId, outcome.text)
 }
 
-const hasPageElementChanges = computed(() => {
-  if (!props.element) return false
-  return (
-    draftContent.value !== props.element.content ||
-    draftType.value !== props.element.type ||
-    draftBbox.value.some((value, index) => value !== props.element?.bbox[index])
-  )
-})
-
 function savePageElement(): void {
-  if (!pageElementTargetRef.value) return
-  const payload = currentPageElementPayload()
-  if (Object.keys(payload).length === 0) return
-  emit('savePageElement', pageElementTargetRef.value, payload)
+  const outcome = pageElementSaveOutcome(pageElementTargetRef.value, pageElementState.value)
+  if (outcome.kind !== 'save') return
+  emit('savePageElement', outcome.targetRef, outcome.payload)
 }
 
 function insertAfter(): void {
@@ -503,21 +501,6 @@ function structuralPanelInputs() {
   }
 }
 
-function currentPageElementPayload(): {
-  content?: string
-  bbox?: [number, number, number, number]
-  type?: ElementType
-} {
-  const payload: { content?: string; bbox?: [number, number, number, number]; type?: ElementType } = {}
-  if (!props.element) return payload
-  if (draftContent.value !== props.element.content) payload.content = draftContent.value
-  if (draftType.value !== props.element.type) payload.type = draftType.value
-  if (draftBbox.value.some((value, index) => value !== props.element?.bbox[index])) {
-    payload.bbox = [...draftBbox.value] as [number, number, number, number]
-  }
-  return payload
-}
-
 // Exit edit mode when the parent reports the save is done (saving goes
 // back to false after being true) and the chunk text matches the draft.
 watch(
@@ -544,16 +527,12 @@ watch(
 watch(
   [draftContent, draftType, draftBbox],
   () => {
-    if (!pageElementTargetRef.value) {
+    const outcome = pageElementPreviewOutcome(pageElementTargetRef.value, pageElementState.value)
+    if (outcome.kind !== 'preview') {
       emit('clearPageElementPreview')
       return
     }
-    const payload = currentPageElementPayload()
-    if (Object.keys(payload).length === 0) {
-      emit('clearPageElementPreview')
-      return
-    }
-    emit('previewPageElement', pageElementTargetRef.value, payload)
+    emit('previewPageElement', outcome.targetRef, outcome.payload)
   },
   { deep: true },
 )
