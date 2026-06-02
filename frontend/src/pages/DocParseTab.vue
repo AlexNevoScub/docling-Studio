@@ -133,7 +133,6 @@ import type { DocChunk, DocTreeNode, DocumentEditCommandInput, ElementType, Page
 import { useAnalysisStore } from '../features/analysis/store'
 import { useChunksStore } from '../features/chunks/store'
 import { fetchDocumentTree } from '../features/document/api'
-import { reconcileSelectedDraftRef, resolveSelectedSelfRef } from '../features/document/editSelection'
 import {
   applyPageElementPreview,
   countTreeNodes,
@@ -143,11 +142,15 @@ import {
   findPageNumberForRef,
 } from '../features/document/parseTabState'
 import {
+  postCommandSelectionState,
+  reconcileSelectionState,
+  selectionStateFromRef,
+} from '../features/document/parseTabSelection'
+import {
   adjacentGroupSiblingRefs,
   adjacentSiblingRefs,
   parentGroupTargetRef,
 } from '../features/document/siblingTargets'
-import { postCommandSelectionRef } from '../features/document/structuralSelection'
 import { useDocumentStore } from '../features/document/store'
 import { chunkForElement } from '../features/document/linkedView'
 import DocTreeRail from '../features/document/ui/DocTreeRail.vue'
@@ -257,9 +260,8 @@ function clearPageElementPreview(): void {
 
 function onTreeSelect(ref: string): void {
   setSelectedNodeRef(ref)
-  const pageOfRef = findPageNumberForRef(documentStore.workspacePages, ref)
-  if (pageOfRef !== null && pageOfRef !== currentPage.value) {
-    currentPage.value = pageOfRef
+  if (selectedNodePageNumber.value !== null && selectedNodePageNumber.value !== currentPage.value) {
+    currentPage.value = selectedNodePageNumber.value
   }
 }
 
@@ -287,13 +289,14 @@ async function onSavePageElement(
 async function onApplyDocumentEditCommands(commands: DocumentEditCommandInput[]): Promise<void> {
   const previousTree = effectiveTree.value
   await documentStore.applyDocumentEditCommands(props.docId, commands)
-  const nextSelectedRef = postCommandSelectionRef(commands, previousTree, effectiveTree.value)
-  if (nextSelectedRef) {
-    setSelectedNodeRef(nextSelectedRef)
-    const pageOfRef = findPageNumberForRef(documentStore.workspacePages, nextSelectedRef)
-    if (pageOfRef !== null && pageOfRef !== currentPage.value) {
-      currentPage.value = pageOfRef
-    }
+  const nextSelection = postCommandSelectionState(
+    commands,
+    previousTree,
+    effectiveTree.value,
+    documentStore.workspacePages,
+  )
+  if (nextSelection) {
+    applySelectionState(nextSelection)
   }
   clearPageElementPreview()
 }
@@ -360,43 +363,40 @@ watch(
 )
 
 function setSelectedNodeRef(ref: string | null): void {
-  selectedNodeRef.value = ref
-  selectedNodeSelfRef.value = resolveSelectedSelfRef(
-    ref,
-    effectiveTree.value,
-    documentStore.workspacePages,
-  )
+  applySelectionState(selectionStateFromRef(ref, effectiveTree.value, documentStore.workspacePages))
 }
 
 function clearSelection(): void {
-  selectedNodeRef.value = null
-  selectedNodeSelfRef.value = null
+  applySelectionState({ selectedRef: null, selectedSelfRef: null, selectedPageNumber: null })
 }
 
 function reconcileSelection(): void {
   if (!selectedNodeRef.value) return
-  const nextSelectedRef = reconcileSelectedDraftRef(
-    selectedNodeRef.value,
-    selectedNodeSelfRef.value,
+  const nextSelection = reconcileSelectionState(
+    {
+      selectedRef: selectedNodeRef.value,
+      selectedSelfRef: selectedNodeSelfRef.value,
+      selectedPageNumber: selectedNodePageNumber.value,
+    },
     effectiveTree.value,
     documentStore.workspacePages,
     documentStore.documentEditRefRemaps,
   )
-  if (!nextSelectedRef) {
-    clearSelection()
-    return
-  }
-  if (nextSelectedRef !== selectedNodeRef.value) {
-    selectedNodeRef.value = nextSelectedRef
-  }
-  selectedNodeSelfRef.value = resolveSelectedSelfRef(
-    nextSelectedRef,
-    effectiveTree.value,
-    documentStore.workspacePages,
-  )
-  const pageOfRef = findPageNumberForRef(documentStore.workspacePages, nextSelectedRef)
-  if (pageOfRef !== null && pageOfRef !== currentPage.value) {
-    currentPage.value = pageOfRef
+  applySelectionState(nextSelection)
+}
+
+const selectedNodePageNumber = ref<number | null>(null)
+
+function applySelectionState(selection: {
+  selectedRef: string | null
+  selectedSelfRef: string | null
+  selectedPageNumber: number | null
+}): void {
+  selectedNodeRef.value = selection.selectedRef
+  selectedNodeSelfRef.value = selection.selectedSelfRef
+  selectedNodePageNumber.value = selection.selectedPageNumber
+  if (selection.selectedPageNumber !== null && selection.selectedPageNumber !== currentPage.value) {
+    currentPage.value = selection.selectedPageNumber
   }
 }
 </script>
