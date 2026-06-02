@@ -147,6 +147,13 @@ import {
   selectionStateFromRef,
 } from '../features/document/parseTabSelection'
 import {
+  docChangeUiState,
+  firstWorkspacePageNumber,
+  nextPageAfterSelection,
+  shouldReloadTreeAfterCommit,
+  shouldReloadTreeForAnalysisChange,
+} from '../features/document/parseTabWorkflow'
+import {
   adjacentGroupSiblingRefs,
   adjacentSiblingRefs,
   parentGroupTargetRef,
@@ -260,9 +267,7 @@ function clearPageElementPreview(): void {
 
 function onTreeSelect(ref: string): void {
   setSelectedNodeRef(ref)
-  if (selectedNodePageNumber.value !== null && selectedNodePageNumber.value !== currentPage.value) {
-    currentPage.value = selectedNodePageNumber.value
-  }
+  currentPage.value = nextPageAfterSelection(currentPage.value, currentSelectionState())
 }
 
 function onHoverElement(_el: PageElement | null): void {
@@ -304,7 +309,7 @@ async function onApplyDocumentEditCommands(commands: DocumentEditCommandInput[])
 async function onCommitDocumentEdits(): Promise<void> {
   const result = await documentStore.commitPendingDocumentEdits(props.docId)
   clearPageElementPreview()
-  if (result?.committed) {
+  if (shouldReloadTreeAfterCommit(result)) {
     await loadTree()
   }
 }
@@ -320,18 +325,17 @@ onMounted(async () => {
     chunksStore.load(props.docId),
     loadTree(),
   ])
-  const first = documentStore.workspacePages[0]?.page_number
-  if (first) currentPage.value = first
+  currentPage.value = firstWorkspacePageNumber(documentStore.workspacePages, currentPage.value)
 })
 
 watch(
   () => props.docId,
   async (id) => {
-    clearSelection()
-    filter.value = ''
     await Promise.all([documentStore.loadWorkspace(id), chunksStore.load(id), loadTree()])
-    const first = documentStore.workspacePages[0]?.page_number
-    if (first) currentPage.value = first
+    const nextState = docChangeUiState(documentStore.workspacePages, currentPage.value)
+    applySelectionState(nextState.selection)
+    filter.value = nextState.filter
+    currentPage.value = nextState.currentPageNumber
   },
 )
 
@@ -343,7 +347,7 @@ watch(
 watch(
   () => documentStore.workspaceActiveAnalysis?.id,
   (newId, oldId) => {
-    if (newId && newId !== oldId) {
+    if (shouldReloadTreeForAnalysisChange(newId, oldId)) {
       clearSelection()
       loadTree()
     }
@@ -386,6 +390,14 @@ function reconcileSelection(): void {
 }
 
 const selectedNodePageNumber = ref<number | null>(null)
+
+function currentSelectionState() {
+  return {
+    selectedRef: selectedNodeRef.value,
+    selectedSelfRef: selectedNodeSelfRef.value,
+    selectedPageNumber: selectedNodePageNumber.value,
+  }
+}
 
 function applySelectionState(selection: {
   selectedRef: string | null
