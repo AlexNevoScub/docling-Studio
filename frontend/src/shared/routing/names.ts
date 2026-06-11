@@ -16,8 +16,6 @@ export const ROUTES = {
   HISTORY: 'history',
   DOCUMENTS: 'documents',
   SEARCH: 'search',
-  REASONING: 'reasoning',
-  REASONING_DOC: 'reasoning-doc',
   SETTINGS: 'settings',
   NOT_FOUND: 'not-found',
 
