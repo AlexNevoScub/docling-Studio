@@ -156,7 +156,7 @@ const messages: Messages = {
     // Home
     'home.title': 'Docling Studio',
     'home.subtitle':
-      'Analysez, explorez et validez la structure de vos documents PDF grâce à Docling.',
+      'Analysez, explorez et validez la structure de vos documents grâce à Docling.',
     'home.documents': 'Documents',
     'home.analyses': 'Analyses',
     'home.recentDocs': 'Documents récents',
@@ -786,7 +786,7 @@ const messages: Messages = {
 
     'home.title': 'Docling Studio',
     'home.subtitle':
-      'Analyze, explore and validate the structure of your PDF documents with Docling.',
+      'Analyze, explore and validate the structure of your documents with Docling.',
     'home.documents': 'Documents',
     'home.analyses': 'Analyses',
     'home.recentDocs': 'Recent documents',
