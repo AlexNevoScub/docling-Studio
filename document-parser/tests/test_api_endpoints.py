@@ -166,12 +166,12 @@ class TestDocumentEndpoints:
         assert data["filename"] == "uploaded.pdf"
 
     def test_upload_docx_document(self, client, mock_document_service):
-        _DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        _docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         mock_document_service.upload = AsyncMock(
             return_value=Document(
                 id="new-2",
                 filename="report.docx",
-                content_type=_DOCX_MIME,
+                content_type=_docx_mime,
                 file_size=1024,
                 storage_path="/tmp/report.docx",
             )
@@ -179,7 +179,7 @@ class TestDocumentEndpoints:
 
         resp = client.post(
             "/api/documents/upload",
-            files={"file": ("report.docx", b"PK\x03\x04" + b"\x00" * 26, _DOCX_MIME)},
+            files={"file": ("report.docx", b"PK\x03\x04" + b"\x00" * 26, _docx_mime)},
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -282,7 +282,7 @@ class TestDocumentEndpoints:
         resp = client.get("/api/documents/d1/export?format=docx")
 
         assert resp.status_code == 200
-        assert resp.headers["content-type"] == _DOCX_MIME
+        assert resp.headers["content-type"] == _docx_mime
         assert resp.headers["content-disposition"] == 'attachment; filename="report.docx"'
 
     def test_export_document_unsupported_format_returns_422(self, client, mock_export_service):
