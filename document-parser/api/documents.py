@@ -187,6 +187,7 @@ async def preview(
             page=page,
             dpi=dpi,
             file_type=file_type,
+            storage_path=doc.storage_path,
         )
         return Response(content=png_bytes, media_type="image/png")
     except ValueError as e:

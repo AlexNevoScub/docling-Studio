@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pdf2image import convert_from_bytes, pdfinfo_from_bytes
@@ -120,10 +121,14 @@ class DocumentService:
 
         # Delete file from disk (only if inside upload dir)
         try:
-            real_path = os.path.realpath(doc.storage_path)
             real_upload_dir = os.path.realpath(self._upload_dir)
+            real_path = os.path.realpath(doc.storage_path)
             if real_path.startswith(real_upload_dir + os.sep) and os.path.exists(real_path):
                 os.unlink(real_path)
+                # Also remove the companion PDF produced for DOCX preview/analysis.
+                companion = Path(doc.storage_path).with_suffix(".pdf")
+                if companion.exists() and str(companion) != doc.storage_path:
+                    companion.unlink(missing_ok=True)
             elif os.path.exists(doc.storage_path):
                 logger.warning("Refused to delete file outside upload dir: %s", doc.storage_path)
         except FileNotFoundError:
@@ -142,14 +147,23 @@ class DocumentService:
         dpi: int = 150,
         *,
         file_type: InputFileType = InputFileType.PDF,
+        storage_path: str | None = None,
     ) -> bytes:
         """Generate a PNG preview of a specific document page.
 
-        For DOCX files, the document is first converted to PDF via LibreOffice
-        headless before rasterisation with pdf2image.
+        For DOCX files, a companion PDF (<same_stem>.pdf) is used if it already
+        exists (created by the analysis pipeline). If not, LibreOffice converts
+        on the fly and the result is cached as the companion PDF so subsequent
+        requests and the analysis step can reuse it without calling LibreOffice again.
         """
         if file_type == InputFileType.DOCX:
-            file_content = _docx_to_pdf_bytes(file_content)
+            companion = Path(storage_path).with_suffix(".pdf") if storage_path else None
+            if companion and companion.exists():
+                file_content = companion.read_bytes()
+            else:
+                file_content = _docx_to_pdf_bytes(file_content)
+                if companion:
+                    companion.write_bytes(file_content)
         images = convert_from_bytes(file_content, first_page=page, last_page=page, dpi=dpi)
         if not images:
             raise ValueError(f"Page {page} not found")
