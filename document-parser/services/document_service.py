@@ -75,7 +75,7 @@ class DocumentService:
         file_type = InputFileType.from_filename(filename)
 
         if not file_type:
-            raise ValueError("Invalid file type: not a pdf or docx document")
+            raise ValueError("Invalid file type. Accepted formats: PDF, DOCX.")
 
         safe_name = f"{uuid.uuid4()}.{file_type.value}"
         file_path = os.path.join(self._upload_dir, safe_name)
