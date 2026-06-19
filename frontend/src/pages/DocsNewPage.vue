@@ -25,7 +25,14 @@
       @drop.prevent="onDrop"
       @click="openPicker"
     >
-      <input ref="fileInput" type="file" multiple accept=".pdf,.docx" hidden @change="onFileSelect" />
+      <input
+        ref="fileInput"
+        type="file"
+        multiple
+        accept=".pdf,.docx"
+        hidden
+        @change="onFileSelect"
+      />
       <svg
         class="drop-icon"
         viewBox="0 0 24 24"
