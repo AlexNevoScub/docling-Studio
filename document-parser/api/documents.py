@@ -182,7 +182,10 @@ async def preview(
         file_content = await asyncio.to_thread(Path(doc.storage_path).read_bytes)
         file_type = InputFileType.from_filename(doc.filename) or InputFileType.PDF
         png_bytes = await asyncio.to_thread(
-            DocumentService.generate_preview, file_content, page=page, dpi=dpi,
+            DocumentService.generate_preview,
+            file_content,
+            page=page,
+            dpi=dpi,
             file_type=file_type,
         )
         return Response(content=png_bytes, media_type="image/png")

@@ -19,8 +19,8 @@ from docling.datamodel.pipeline_options import (
     TableFormerMode,
     TableStructureOptions,
 )
-from docling.document_converter import DocumentConverter as DoclingConverter, WordFormatOption
-from docling.document_converter import PdfFormatOption
+from docling.document_converter import DocumentConverter as DoclingConverter
+from docling.document_converter import PdfFormatOption, WordFormatOption
 from docling_core.types.doc import (
     CodeItem,
     DocItem,

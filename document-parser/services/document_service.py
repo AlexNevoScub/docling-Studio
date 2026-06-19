@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 _UPLOAD_CHUNK_SIZE = 64 * 1024  # 64 KB chunks for streaming writes
 
+
 @dataclass
 class DocumentConfig:
     """Configuration values needed by DocumentService, extracted from settings."""
@@ -70,7 +71,6 @@ class DocumentService:
         if 0 < self._max_file_size < len(file_content):
             raise ValueError(f"File too large (max {self._config.max_file_size_mb} MB)")
 
-
         file_type = InputFileType.from_filename(filename)
 
         if not file_type:
@@ -85,10 +85,7 @@ class DocumentService:
             _persist_and_count, self._upload_dir, file_path, file_content, file_type
         )
 
-        if (
-            0 < self._max_page_count < page_count
-            and page_count is not None
-        ):
+        if 0 < self._max_page_count < page_count and page_count is not None:
             await asyncio.to_thread(os.unlink, file_path)
             raise ValueError(
                 f"Too many pages ({page_count}). Maximum allowed: {self._max_page_count}"
@@ -178,8 +175,10 @@ def _docx_to_pdf_bytes(file_content: bytes) -> bytes:
                 [
                     "libreoffice",
                     "--headless",
-                    "--convert-to", "pdf",
-                    "--outdir", tmpdir,
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    tmpdir,
                     docx_path,
                 ],
                 capture_output=True,
@@ -192,14 +191,15 @@ def _docx_to_pdf_bytes(file_content: bytes) -> bytes:
             ) from exc
         if not os.path.exists(pdf_path):
             raise ValueError(
-                "LibreOffice DOCX→PDF conversion failed: "
-                + result.stderr.decode(errors="replace")
+                "LibreOffice DOCX→PDF conversion failed: " + result.stderr.decode(errors="replace")
             )
         with open(pdf_path, "rb") as fh:
             return fh.read()
 
 
-def _persist_and_count(upload_dir: str, file_path: str, file_content: bytes, file_type: InputFileType) -> int | None:
+def _persist_and_count(
+    upload_dir: str, file_path: str, file_content: bytes, file_type: InputFileType
+) -> int | None:
     """Write the uploaded bytes to disk and return the page count.
 
     Synchronous helper meant to be invoked through `asyncio.to_thread` so

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
 from pathlib import Path
+from typing import Any
 
 # US Letter page dimensions (points) — fallback when page size is unknown
 DEFAULT_PAGE_WIDTH: float = 612.0
@@ -297,6 +297,7 @@ class GraphPayload:
     edge_count: int
     truncated: bool
     page_count: int
+
 
 class InputFileType(StrEnum):
     PDF = "pdf"
