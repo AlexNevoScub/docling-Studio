@@ -19,7 +19,7 @@ from docling.datamodel.pipeline_options import (
     TableFormerMode,
     TableStructureOptions,
 )
-from docling.document_converter import DocumentConverter as DoclingConverter
+from docling.document_converter import DocumentConverter as DoclingConverter, WordFormatOption
 from docling.document_converter import PdfFormatOption
 from docling_core.types.doc import (
     CodeItem,
@@ -108,6 +108,7 @@ def _build_docling_converter(options: ConversionOptions) -> DoclingConverter:
     return DoclingConverter(
         format_options={
             InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+            InputFormat.DOCX: WordFormatOption(pipeline_options=pipeline_options),
         }
     )
 
@@ -248,7 +249,12 @@ def _convert_sync(
     page_count = len(doc.pages)
     pages_detail, skipped = _extract_pages_detail(result)
 
-    if not pages_detail and page_count > 0:
+    if not pages_detail:
+        # DOCX (and other flow-format) documents report 0 physical pages in
+        # Docling's page model — items have no prov/bbox. Build synthetic
+        # page entries so the frontend viewer can render the LibreOffice
+        # preview image. Falls back to 1 page minimum.
+        n = max(page_count, 1)
         pages_detail = [
             PageDetail(
                 page_number=i + 1,
@@ -257,11 +263,11 @@ def _convert_sync(
                 if (i + 1) in doc.pages
                 else DEFAULT_PAGE_HEIGHT,
             )
-            for i in range(page_count)
+            for i in range(n)
         ]
 
     if skipped > 0:
-        logger.info("Parsed: %d pages, %d items skipped", page_count, skipped)
+        logger.info("Parsed: %d pages, %d items skipped", len(pages_detail), skipped)
 
     return ConversionResult(
         page_count=page_count or len(pages_detail) or 1,

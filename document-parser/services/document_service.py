@@ -6,6 +6,8 @@ import asyncio
 import io
 import logging
 import os
+import subprocess
+import tempfile
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -13,18 +15,14 @@ from typing import TYPE_CHECKING
 from pdf2image import convert_from_bytes, pdfinfo_from_bytes
 
 from domain.models import Document
+from domain.value_objects import InputFileType
 
 if TYPE_CHECKING:
     from domain.ports import AnalysisRepository, DocumentRepository
 
 logger = logging.getLogger(__name__)
 
-
-# PDF magic bytes: %PDF
-_PDF_MAGIC = b"%PDF"
-
 _UPLOAD_CHUNK_SIZE = 64 * 1024  # 64 KB chunks for streaming writes
-
 
 @dataclass
 class DocumentConfig:
@@ -69,26 +67,27 @@ class DocumentService:
         offloaded to a worker thread so the FastAPI event loop stays free
         for other requests during large uploads.
         """
-        if self._max_file_size > 0 and len(file_content) > self._max_file_size:
+        if 0 < self._max_file_size < len(file_content):
             raise ValueError(f"File too large (max {self._config.max_file_size_mb} MB)")
 
-        if not file_content[:4].startswith(_PDF_MAGIC):
-            raise ValueError("Invalid file: not a PDF document")
 
-        ext = ".pdf"  # Content already validated as PDF
-        safe_name = f"{uuid.uuid4()}{ext}"
+        file_type = InputFileType.from_filename(filename)
+
+        if not file_type:
+            raise ValueError("Invalid file type: not a pdf or docx document")
+
+        safe_name = f"{uuid.uuid4()}.{file_type.value}"
         file_path = os.path.join(self._upload_dir, safe_name)
 
         # Disk write + poppler subprocess — both blocking. Offload together
         # so we cross the thread boundary once instead of twice.
         page_count = await asyncio.to_thread(
-            _persist_and_count, self._upload_dir, file_path, file_content
+            _persist_and_count, self._upload_dir, file_path, file_content, file_type
         )
 
         if (
-            self._max_page_count > 0
+            0 < self._max_page_count < page_count
             and page_count is not None
-            and page_count > self._max_page_count
         ):
             await asyncio.to_thread(os.unlink, file_path)
             raise ValueError(
@@ -140,18 +139,67 @@ class DocumentService:
         return await self._document_repo.delete(doc_id)
 
     @staticmethod
-    def generate_preview(file_content: bytes, page: int = 1, dpi: int = 150) -> bytes:
-        """Generate a PNG preview of a specific PDF page."""
+    def generate_preview(
+        file_content: bytes,
+        page: int = 1,
+        dpi: int = 150,
+        *,
+        file_type: InputFileType = InputFileType.PDF,
+    ) -> bytes:
+        """Generate a PNG preview of a specific document page.
+
+        For DOCX files, the document is first converted to PDF via LibreOffice
+        headless before rasterisation with pdf2image.
+        """
+        if file_type == InputFileType.DOCX:
+            file_content = _docx_to_pdf_bytes(file_content)
         images = convert_from_bytes(file_content, first_page=page, last_page=page, dpi=dpi)
         if not images:
             raise ValueError(f"Page {page} not found")
-
         buf = io.BytesIO()
         images[0].save(buf, format="PNG")
         return buf.getvalue()
 
 
-def _persist_and_count(upload_dir: str, file_path: str, file_content: bytes) -> int | None:
+def _docx_to_pdf_bytes(file_content: bytes) -> bytes:
+    """Convert DOCX bytes to PDF bytes via LibreOffice headless.
+
+    Writes the DOCX to a temp directory, runs LibreOffice --headless --convert-to pdf,
+    reads the resulting PDF, then cleans up. Raises FileNotFoundError if LibreOffice
+    is not installed, ValueError if the conversion fails.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        docx_path = os.path.join(tmpdir, "input.docx")
+        pdf_path = os.path.join(tmpdir, "input.pdf")
+        with open(docx_path, "wb") as fh:
+            fh.write(file_content)
+        try:
+            result = subprocess.run(
+                [
+                    "libreoffice",
+                    "--headless",
+                    "--convert-to", "pdf",
+                    "--outdir", tmpdir,
+                    docx_path,
+                ],
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                "LibreOffice is not installed or not in PATH — cannot generate DOCX preview"
+            ) from exc
+        if not os.path.exists(pdf_path):
+            raise ValueError(
+                "LibreOffice DOCX→PDF conversion failed: "
+                + result.stderr.decode(errors="replace")
+            )
+        with open(pdf_path, "rb") as fh:
+            return fh.read()
+
+
+def _persist_and_count(upload_dir: str, file_path: str, file_content: bytes, file_type: InputFileType) -> int | None:
     """Write the uploaded bytes to disk and return the page count.
 
     Synchronous helper meant to be invoked through `asyncio.to_thread` so
@@ -162,17 +210,20 @@ def _persist_and_count(upload_dir: str, file_path: str, file_content: bytes) -> 
     with open(file_path, "wb") as f:
         for offset in range(0, len(file_content), _UPLOAD_CHUNK_SIZE):
             f.write(file_content[offset : offset + _UPLOAD_CHUNK_SIZE])
-    return _count_pages(file_content)
+    return _count_pages(file_content, file_type)
 
 
-def _count_pages(file_content: bytes) -> int | None:
+def _count_pages(file_content: bytes, file_type: InputFileType) -> int | None:
     """Count PDF pages using poppler via pdf2image."""
-    try:
-        info = pdfinfo_from_bytes(file_content)
-        return info.get("Pages")
-    except (FileNotFoundError, OSError) as exc:
-        logger.warning("Could not count pages: %s", exc)
-        return None
-    except Exception:
-        logger.warning("Unexpected error counting pages", exc_info=True)
+    if file_type == InputFileType.PDF:
+        try:
+            info = pdfinfo_from_bytes(file_content)
+            return info.get("Pages")
+        except (FileNotFoundError, OSError) as exc:
+            logger.warning("Could not count pages: %s", exc)
+            return None
+        except Exception:
+            logger.warning("Unexpected error counting pages", exc_info=True)
+            return None
+    else:
         return None
