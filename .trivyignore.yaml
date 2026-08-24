@@ -5,10 +5,12 @@ vulnerabilities:
     # not against installed file paths. A `paths:` filter would silently
     # fail to match and the ignore would be a no-op (which it was).
     statement: >-
-      Mesa OOB read (fix: Mesa 25.3.6 / 26.0.1). No Debian 13 backport available.
-      Pulled transitively by libgl1 (required by OpenCV/RapidOCR). Tracked in #189
-      with follow-up to drop libgl1 via opencv-python-headless.
-    expired_at: 2026-06-30
+      Mesa OOB read (fix: Mesa 25.3.6 / 26.0.1). No Debian 13 backport available
+      as of 2026-08-24. Pulled transitively by libgl1 (required by OpenCV/RapidOCR),
+      not reachable from application code. Tracked in #189 (drop libgl1 via
+      opencv-python-headless) — the real fix. Expiry extended from 2026-06-30 to
+      keep the 0.7.0 release unblocked while #189 lands.
+    expired_at: 2026-11-30
   - id: CVE-2026-7598
     # libssh2 1.11.1-1 (Debian 13 trixie). Pulled transitively by git/libcurl
     # in the python:3.12-slim base image. Not invoked from application code —
