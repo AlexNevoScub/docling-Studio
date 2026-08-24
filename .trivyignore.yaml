@@ -50,3 +50,15 @@ vulnerabilities:
       no Perl interpreter is reached from the application surface and no
       untrusted regex is fed to perl. Re-evaluate alongside CVE-2026-42496.
     expired_at: 2026-09-30
+  - id: CVE-2026-13221
+    # perl-base 5.40.1-6 (Debian 13 trixie). Same class + reachability
+    # argument as CVE-2026-42496 / CVE-2026-8376: incorrect regex processing
+    # in perl, but perl-base is dpkg/apt build-tooling in python:3.12-slim and
+    # is never invoked from application code (no Perl handlers, no untrusted
+    # regex fed to perl). Surfaced in Trivy's DB after the 0.7.0 build.
+    statement: >-
+      perl incorrect regular-expression processing (no upstream fix / Debian 13
+      backport yet). perl-base ships as build tooling in python:3.12-slim; no
+      Perl interpreter is reached from the application surface. Re-evaluate
+      alongside CVE-2026-42496 / CVE-2026-8376.
+    expired_at: 2026-11-30
