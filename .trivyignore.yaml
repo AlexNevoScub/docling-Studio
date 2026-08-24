@@ -50,6 +50,35 @@ vulnerabilities:
       no Perl interpreter is reached from the application surface and no
       untrusted regex is fed to perl. Re-evaluate alongside CVE-2026-42496.
     expired_at: 2026-09-30
+  - id: CVE-2026-58016
+    # libglib2.0-0t64 2.84.4-3~deb13u3 (Debian 13 trixie), `local` image only.
+    # Installed explicitly by the Dockerfile (`libgl1` + `libglib2.0-0`) because
+    # `rapidocr` pulls `opencv-python` (full) instead of `opencv-python-headless`.
+    # Verified not reachable: the vulnerable path is GDBus introspection-XML
+    # parsing, and the backend has no D-Bus surface at all (grep for
+    # dbus/gi.repository/pygobject across document-parser returns nothing) —
+    # glib is only present as a shared-object dependency of the OpenCV stack.
+    statement: >-
+      glib integer underflow in gio/gdbusintrospection.c (no upstream fix, no
+      Debian 13 backport as of 2026-08-24). Present only in the `local` image
+      via libglib2.0-0, itself required by the full opencv-python that rapidocr
+      pulls. No D-Bus code path exists in the application. The real fix is #189
+      (force opencv-python-headless and drop libgl1 + libglib2.0-0).
+    expired_at: 2026-10-31
+  - id: CVE-2026-6653
+    # libxml2 2.12.7+dfsg (Debian 13 trixie), `local` image only.
+    # Note the distinction: the application's XML parsing goes through the
+    # `lxml` manylinux wheel, which statically bundles its OWN libxml2 — not
+    # this Debian system package. The system libxml2 is dpkg/apt + OpenCV
+    # tooling and is not fed untrusted input by the backend.
+    statement: >-
+      libxml2 denial of service (no upstream fix, no Debian 13 backport as of
+      2026-08-24). The Debian system libxml2 is build/OS tooling; application
+      XML parsing uses the lxml wheel's own bundled libxml2. Impact is DoS
+      only, on a deployment whose trust model already requires network-level
+      protection (see SECURITY.md). Re-evaluate at expiry or when Debian
+      publishes a backport.
+    expired_at: 2026-10-31
   - id: CVE-2026-13221
     # perl-base 5.40.1-6 (Debian 13 trixie). Same class + reachability
     # argument as CVE-2026-42496 / CVE-2026-8376: incorrect regex processing
